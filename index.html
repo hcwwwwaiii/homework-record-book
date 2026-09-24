@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#183b3b">
+  <meta name="description" content="記錄各班所有功課的收交情況、每日狀態與欠交警示。">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23183b3b'/%3E%3Cpath d='M19 16h21l7 7v25H19z' fill='none' stroke='%23f4e9cc' stroke-width='4'/%3E%3Cpath d='M27 33h13M27 41h9' stroke='%23f4e9cc' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
+  <title>功課記錄簿</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="網站導覽">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">欠</span><span><strong>功課記錄簿</strong><small>全班功課紀錄</small></span></div>
+      <nav class="side-nav" aria-label="頁面">
+        <button class="nav-link active" data-view="assignments" type="button"><span aria-hidden="true">▦</span> 功課紀錄</button>
+        <button class="nav-link" data-view="students" type="button"><span aria-hidden="true">◫</span> 學生名單</button>
+        <button class="nav-link" data-view="archive" type="button"><span aria-hidden="true">▣</span> 已封存</button>
+        <button class="nav-link" data-view="records" type="button"><span aria-hidden="true">◎</span> 欠交記錄</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <button class="text-button sidebar-settings" id="classSettingsButton" type="button">⚙ <span>班別設定</span></button>
+        <p>紀錄儲存在此瀏覽器。<br>更換裝置時不會自動同步。</p>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <div><p class="eyebrow">課堂管理</p><h1>功課記錄簿</h1></div>
+        <div class="topbar-right"><span id="todayLabel" class="today-label"></span><button id="mobileSettingsButton" class="icon-button mobile-settings" type="button" aria-label="班別設定">⚙</button></div>
+      </header>
+
+      <section class="class-section" aria-label="選擇班別">
+        <div class="class-tabs" id="classTabs"></div>
+      </section>
+
+      <section class="overview" aria-labelledby="overviewTitle">
+        <div class="overview-heading"><div><p class="eyebrow" id="subjectLabel"></p><h2 id="overviewTitle"></h2></div><p class="overview-hint">每累積 5 次未交記錄，記 1 次警示</p></div>
+        <div class="stats-grid">
+          <div class="stat-card"><span>待交功課</span><strong id="outstandingCount">0</strong><small>現行功課尚未交回</small></div>
+          <div class="stat-card"><span>累計欠交</span><strong id="missCount">0</strong><small>按學生每日未交次數計算</small></div>
+          <div class="stat-card warning-stat"><span>累計警示</span><strong id="warningCount">0</strong><small>每位學生每 5 次未交計 1 次</small></div>
+        </div>
+      </section>
+
+      <section id="assignmentsView" class="workspace" aria-labelledby="assignmentsTitle">
+        <div class="section-heading"><div><p class="eyebrow">全班收交情況</p><h2 id="assignmentsTitle">功課紀錄</h2></div><button id="addAssignmentButton" class="primary-button" type="button"><span aria-hidden="true">＋</span> 新增功課</button></div>
+        <div id="assignmentsList" class="assignments-list"></div>
+      </section>
+
+      <section id="studentsView" class="workspace" aria-labelledby="studentsTitle" hidden>
+        <div class="section-heading"><div><p class="eyebrow">學生管理</p><h2 id="studentsTitle">學生名單</h2></div><button id="addStudentButton" class="primary-button" type="button"><span aria-hidden="true">＋</span> 加入學生</button></div>
+        <div id="studentsContent"></div>
+      </section>
+
+      <section id="archiveView" class="workspace" aria-labelledby="archiveTitle" hidden>
+        <div class="section-heading"><div><p class="eyebrow">過期功課</p><h2 id="archiveTitle">已封存</h2></div></div>
+        <div id="archiveList" class="assignments-list"></div>
+      </section>
+
+      <section id="recordsView" class="workspace" aria-labelledby="recordsTitle" hidden>
+        <div class="section-heading"><div><p class="eyebrow">學生表現</p><h2 id="recordsTitle">欠交記錄</h2></div></div>
+        <div class="records-grid">
+          <section class="record-panel" aria-labelledby="warningRecordsTitle">
+            <div class="record-panel-heading"><h3 id="warningRecordsTitle">警示學生</h3><span>累計每 5 次欠交記 1 次</span></div>
+            <div id="warningRecords"></div>
+          </section>
+          <section class="record-panel" aria-labelledby="excellentRecordsTitle">
+            <div class="record-panel-heading"><h3 id="excellentRecordsTitle">每月表現優異</h3><label class="month-control">月份 <input id="recordsMonth" type="month"></label></div>
+            <p class="form-note">自動列出本月有已交或未交記錄、欠交不多於 2 次的學生；缺席不計欠交。</p>
+            <div id="excellentRecords"></div>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="assignmentDialog" class="modal">
+    <form id="assignmentForm" class="modal-form">
+      <div class="modal-heading"><div><p class="eyebrow">功課資料</p><h2 id="assignmentDialogTitle">新增功課</h2></div><button class="close-button" type="button" data-close aria-label="關閉">×</button></div>
+      <input id="assignmentId" type="hidden">
+      <label id="topicSelectField" class="field" hidden>章節／課題 <span class="required">*</span><select id="assignmentTopicSelect"></select></label>
+      <label id="topicCustomField" class="field" hidden>課題名稱 <span class="required">*</span><input id="assignmentTopicCustom" type="text" maxlength="80" placeholder="輸入課題名稱"></label>
+      <label class="field">功課名稱 <span class="required">*</span><select id="assignmentNameSelect" required><option value="">選擇功課名稱</option><option value="預習">預習</option><option value="課堂練習">課堂練習</option><option value="鞏固練習">鞏固練習</option><option value="TSA練習">TSA練習</option><option value="other">其他</option></select></label>
+      <label id="assignmentTitleField" class="field" hidden>自訂功課名稱 <span class="required">*</span><input id="assignmentTitle" type="text" maxlength="100" placeholder="輸入功課名稱"></label>
+      <label class="field">繳交日期 <span class="required">*</span><input id="assignmentDue" type="date" required></label>
+      <div class="field"><label for="assignmentSample">功課樣本（圖片或 PDF）</label><label class="upload-zone" for="assignmentSample"><span class="upload-icon" aria-hidden="true">↑</span><strong id="uploadTitle">選擇樣本檔案</strong><small>支援 JPG、PNG、WebP、GIF 或 PDF，最多 15 MB</small></label><input id="assignmentSample" class="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"><div id="selectedFile" class="selected-file" aria-live="polite"></div></div>
+      <p class="form-note">圖片會顯示整張；PDF 會開啟第一頁預覽。你也可以稍後再加入樣本。</p>
+      <div class="modal-actions"><button class="secondary-button" type="button" data-close>取消</button><button class="primary-button" type="submit">儲存功課</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="studentDialog" class="modal">
+    <form id="studentForm" class="modal-form">
+      <div class="modal-heading"><div><p class="eyebrow">班別名單</p><h2>加入學生</h2></div><button class="close-button" type="button" data-close aria-label="關閉">×</button></div>
+      <label class="field">學生姓名 <span class="required">*</span><textarea id="studentNames" rows="7" required placeholder="每行一位學生，例如：&#10;陳大文&#10;李小明"></textarea></label>
+      <p class="form-note">可一次貼上整份名單，每行一位；重複姓名會自動略過。</p>
+      <div class="modal-actions"><button class="secondary-button" type="button" data-close>取消</button><button class="primary-button" type="submit">加入名單</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="missingDialog" class="modal">
+    <form id="missingForm" class="modal-form">
+      <div class="modal-heading"><div><p class="eyebrow">首次收功課</p><h2>第一次記錄欠交</h2></div><button class="close-button" type="button" data-close aria-label="關閉">×</button></div>
+      <p id="missingAssignmentName" class="dialog-context"></p>
+      <input id="missingAssignmentId" type="hidden">
+      <label class="field" for="firstRecordDate">首次收交日期 <input id="firstRecordDate" type="date" required></label>
+      <p class="form-note">勾選當天欠交或缺席的學生；未勾選的學生會記為「已交」。欠交計 1 次，缺席不計。</p>
+      <p id="historicalRecordNote" class="form-note historical-record-note" hidden>這是補錄過往功課。勾選「今天仍未交」可同時新增今天的欠交記錄，每位再計 1 次；中間日期不會自動累計。</p>
+      <label class="field" for="studentSearch">搜尋學生</label><input id="studentSearch" class="search-input" type="search" placeholder="輸入姓名搜尋">
+      <div id="missingStudentList" class="checklist" role="group" aria-label="選擇學生"></div>
+      <p id="missingSelectionCount" class="form-note"></p>
+      <div class="modal-actions"><button class="secondary-button" type="button" data-close>取消</button><button class="primary-button" type="submit">儲存紀錄</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="trackingDialog" class="tracking-modal">
+    <div class="tracking-heading"><div><p class="eyebrow" id="trackingEyebrow">每日收交記錄</p><h2 id="trackingTitle"></h2><p class="tracking-help" id="trackingHelp">選擇已補交或缺席；未選擇者在儲存時記為當日繼續欠交。</p></div><button class="close-button" type="button" data-close aria-label="關閉">×</button></div>
+    <div class="tracking-toolbar"><input id="trackingAssignmentId" type="hidden"><label id="trackingDateLabel" class="tracking-date">記錄日期 <input id="trackingDate" type="date"></label><label for="trackingSearch" class="visually-hidden">搜尋學生</label><input id="trackingSearch" class="search-input" type="search" placeholder="搜尋姓名或班號"><span id="trackingSummary"></span></div>
+    <div id="trackingRows" class="tracking-rows"></div>
+    <div id="trackingSavebar" class="tracking-savebar"><span>沒有選擇的學生會記為當日繼續欠交。</span><button id="saveTrackingButton" class="primary-button" type="button">儲存當日紀錄</button></div>
+  </dialog>
+
+  <dialog id="settingsDialog" class="modal">
+    <form id="settingsForm" class="modal-form">
+      <div class="modal-heading"><div><p class="eyebrow">班別設定</p><h2>編輯班別名稱</h2></div><button class="close-button" type="button" data-close aria-label="關閉">×</button></div>
+      <p class="dialog-context">三個班別的科目已分為兩班數學、一班物理。</p>
+      <div id="classNameFields"></div>
+      <div class="backup-tools"><strong>資料備份與轉移</strong><p class="form-note">匯出檔案包含學生姓名、功課記錄和已上載樣本。請私下保存；在 GitHub 網站開啟「班別設定」後，可匯入此檔案。</p><div class="backup-actions"><button id="exportBackupButton" class="secondary-button" type="button">匯出完整備份</button><button id="importBackupButton" class="secondary-button" type="button">匯入備份</button><input id="importBackupFile" type="file" accept="application/json,.json" hidden></div></div>
+      <div class="modal-actions"><button class="secondary-button" type="button" data-close>取消</button><button class="primary-button" type="submit">儲存名稱</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="previewDialog" class="preview-modal">
+    <div class="preview-heading"><div><p class="eyebrow">功課樣本</p><h2 id="previewTitle"></h2></div><button class="close-button" type="button" data-close aria-label="關閉">×</button></div>
+    <div id="previewContent" class="preview-content"></div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
+
