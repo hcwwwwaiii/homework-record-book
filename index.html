@@ -8,10 +8,11 @@
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23183b3b'/%3E%3Cpath d='M19 16h21l7 7v25H19z' fill='none' stroke='%23f4e9cc' stroke-width='4'/%3E%3Cpath d='M27 33h13M27 41h9' stroke='%23f4e9cc' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
   <title>功課記錄簿</title>
   <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
-  <div class="app-shell">
+  <div class="app-shell" id="appShell" hidden>
     <aside class="sidebar" aria-label="網站導覽">
       <div class="brand"><span class="brand-mark" aria-hidden="true">欠</span><span><strong>功課記錄簿</strong><small>全班功課紀錄</small></span></div>
       <nav class="side-nav" aria-label="頁面">
@@ -22,7 +23,7 @@
       </nav>
       <div class="sidebar-bottom">
         <button class="text-button sidebar-settings" id="classSettingsButton" type="button">⚙ <span>班別設定</span></button>
-        <p>紀錄儲存在此瀏覽器。<br>更換裝置時不會自動同步。</p>
+        <p id="syncStatus">正在連接雲端同步…</p>
       </div>
     </aside>
 
@@ -129,6 +130,7 @@
       <div class="modal-heading"><div><p class="eyebrow">班別設定</p><h2>編輯班別名稱</h2></div><button class="close-button" type="button" data-close aria-label="關閉">×</button></div>
       <p class="dialog-context">三個班別的科目已分為兩班數學、一班物理。</p>
       <div id="classNameFields"></div>
+      <div class="backup-tools"><strong>雲端同步</strong><p id="cloudSyncStatus" class="form-note">登入後同步班別、學生、功課及收交紀錄。</p><button id="cloudSignOutButton" class="secondary-button" type="button" hidden>登出雲端同步</button></div>
       <div class="backup-tools"><strong>資料備份與轉移</strong><p class="form-note">匯出檔案包含學生姓名、功課記錄和已上載樣本。請私下保存；在 GitHub 網站開啟「班別設定」後，可匯入此檔案。</p><div class="backup-actions"><button id="exportBackupButton" class="secondary-button" type="button">匯出完整備份</button><button id="importBackupButton" class="secondary-button" type="button">匯入備份</button><input id="importBackupFile" type="file" accept="application/json,.json" hidden></div></div>
       <div class="modal-actions"><button class="secondary-button" type="button" data-close>取消</button><button class="primary-button" type="submit">儲存名稱</button></div>
     </form>
@@ -139,6 +141,16 @@
     <div id="previewContent" class="preview-content"></div>
   </dialog>
 
+  <div id="cloudGate" class="cloud-gate" hidden>
+    <form id="cloudLoginForm" class="cloud-login">
+      <p class="eyebrow">雲端同步</p><h1>登入功課記錄簿</h1>
+      <p>使用已建立的教師帳戶登入，跨裝置共用同一份班別及功課紀錄。</p>
+      <label class="field">電郵地址<input id="cloudEmail" type="email" autocomplete="username" required></label>
+      <label class="field">密碼<input id="cloudPassword" type="password" autocomplete="current-password" required></label>
+      <button id="cloudLoginButton" class="primary-button" type="submit">登入並同步</button>
+      <p id="cloudLoginMessage" class="cloud-login-message" role="status" aria-live="polite"></p>
+    </form>
+  </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 </body>
 </html>
