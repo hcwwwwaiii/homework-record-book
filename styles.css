@@ -122,3 +122,11 @@
 #assignmentDetailTopic{min-height:76px}
 .assignment-detail-topic{font-size:12px;line-height:1.5;color:#5d796b;margin:-5px 0 12px;white-space:pre-wrap;overflow-wrap:anywhere;font-weight:500}
 .assignment-detail-topic strong{font-weight:750}
+
+.cloud-gate{min-height:100vh;padding:24px;display:grid;place-items:center;background:#f5f5f0}
+.cloud-login{width:min(100%,440px);padding:34px;background:#fff;border:1px solid #e1e9e2;border-radius:18px;box-shadow:0 12px 40px #1c3d2a10}
+.cloud-login h1{font-size:26px;margin:0 0 10px;letter-spacing:-.04em}
+.cloud-login>p:not(.eyebrow):not(.cloud-login-message){font-size:13px;line-height:1.65;color:#71867a;margin:0 0 24px}
+.cloud-login .primary-button{width:100%;margin-top:4px}
+.cloud-login-message{font-size:12px;color:#a55141;line-height:1.6;min-height:20px;margin:14px 0 0}
+@media(max-width:520px){.cloud-gate{padding:16px}.cloud-login{padding:25px 20px}}
