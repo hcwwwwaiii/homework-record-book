@@ -2,6 +2,12 @@
   "use strict";
 
   const STORAGE_KEY = "homework-followup-v1";
+  const CLOUD_URL = "https://omemhiwbmuzzfsrawlpg.supabase.co";
+  const CLOUD_KEY = "sb_publishable_p_u_0rNMe1BgH5o_QQUUyg_6ksNm1xg";
+  const CLOUD_TABLE = "homework_sync_state";
+  const CLOUD_BUCKET = "homework-samples";
+  const CLOUD_USER_KEY = STORAGE_KEY + "-cloud-user";
+  const CLOUD_DIRTY_KEY = STORAGE_KEY + "-cloud-dirty";
   const DEFAULT_CLASSES = [
     { id: "math-a", name: "數學 A 班", subject: "數學" },
     { id: "math-b", name: "數學 B 班", subject: "數學" },
@@ -42,6 +48,14 @@
   };
   const HOMEWORK_NAMES = ["預習", "課堂練習", "鞏固練習", "TSA練習"];
   const $ = (selector) => document.querySelector(selector);
+  let cloudClient = null;
+  let cloudReady = false;
+  let cloudBusy = false;
+  let cloudPending = false;
+  let cloudTimer = null;
+  let cloudTimestamp = null;
+  let cloudChannel = null;
+  let cloudUserId = null;
   const state = loadState();
   let activeClassId = DEFAULT_CLASSES[0].id;
   let activeView = "assignments";
@@ -117,11 +131,198 @@
   function saveState() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      if (cloudReady) {
+        localStorage.setItem(CLOUD_DIRTY_KEY, "1");
+        queueCloudSave();
+      }
       return true;
     } catch (error) {
       console.error("Unable to save records", error);
       toast("無法儲存紀錄，請檢查瀏覽器儲存空間。", true);
       return false;
+    }
+  }
+
+  function setCloudStatus(message) {
+    const status = $("#syncStatus");
+    const settings = $("#cloudSyncStatus");
+    if (status) status.textContent = message;
+    if (settings) settings.textContent = message;
+  }
+
+  function validCloudState(data) {
+    return data && Array.isArray(data.classes) && Array.isArray(data.students) &&
+      Array.isArray(data.assignments) && Array.isArray(data.misses);
+  }
+
+  function mergeCloudState(remote, local) {
+    const merged = { ...remote, ...local };
+    const collections = ["classes", "students", "assignments", "misses", "absences", "dailyRecords", "excellentByMonth"];
+    for (const key of collections) {
+      const byId = new Map();
+      for (const item of [...(remote[key] || []), ...(local[key] || [])]) {
+        if (item && item.id != null) byId.set(String(item.id), { ...(byId.get(String(item.id)) || {}), ...item });
+      }
+      merged[key] = Array.from(byId.values());
+    }
+    return merged;
+  }
+
+  function applyCloudState(data) {
+    if (!validCloudState(data)) throw new Error("雲端資料格式不正確。");
+    Object.keys(state).forEach((key) => delete state[key]);
+    Object.assign(state, data);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  function queueCloudSave() {
+    if (!cloudReady || !cloudClient) return;
+    cloudPending = true;
+    setCloudStatus("有待同步的變更…");
+    clearTimeout(cloudTimer);
+    cloudTimer = setTimeout(syncCloudNow, 700);
+  }
+
+  async function syncCloudNow() {
+    if (!cloudReady || !cloudClient) return;
+    if (cloudBusy) { cloudPending = true; return; }
+    cloudBusy = true;
+    cloudPending = false;
+    let failed = false;
+    try {
+      const { data: latest, error: readError } = await cloudClient
+        .from(CLOUD_TABLE).select("data,updated_at").eq("id", "main").maybeSingle();
+      if (readError) throw readError;
+      if (latest && cloudTimestamp && latest.updated_at !== cloudTimestamp) {
+        applyCloudState(mergeCloudState(latest.data, state));
+        cloudTimestamp = latest.updated_at;
+        render();
+      }
+      const payload = JSON.parse(JSON.stringify(state));
+      const { data: saved, error } = await cloudClient.from(CLOUD_TABLE)
+        .upsert({ id: "main", data: payload, updated_at: new Date().toISOString() }, { onConflict: "id" })
+        .select("updated_at").single();
+      if (error) throw error;
+      cloudTimestamp = saved.updated_at;
+      localStorage.removeItem(CLOUD_DIRTY_KEY);
+      setCloudStatus("已同步 · " + new Date(saved.updated_at).toLocaleTimeString("zh-HK", { hour: "2-digit", minute: "2-digit" }));
+    } catch (error) {
+      console.error("Cloud sync failed", error);
+      failed = true;
+      cloudPending = true;
+      localStorage.setItem(CLOUD_DIRTY_KEY, "1");
+      setCloudStatus("同步暫時失敗；紀錄仍保存在本機，恢復連線後會重試。");
+    } finally {
+      cloudBusy = false;
+      if (!failed && cloudPending && cloudReady && navigator.onLine) queueCloudSave();
+    }
+  }
+
+  async function uploadLocalSamples() {
+    for (const assignment of state.assignments) {
+      if (!assignment.sampleType) continue;
+      const file = await sampleOperation("readonly", assignment.id).catch(() => null);
+      if (!file) continue;
+      const { error } = await cloudClient.storage.from(CLOUD_BUCKET)
+        .upload(assignment.id, file, { upsert: true, contentType: file.type });
+      if (error) console.warn("Unable to sync homework sample", assignment.id, error);
+    }
+  }
+
+  async function startCloudSession(session) {
+    if (!session?.user?.id) throw new Error("未能確認登入帳戶。");
+    if (cloudReady && cloudUserId === session.user.id) return;
+    cloudReady = false;
+    cloudUserId = session.user.id;
+    setCloudStatus("正在載入雲端紀錄…");
+    const { data: remote, error } = await cloudClient.from(CLOUD_TABLE)
+      .select("data,updated_at").eq("id", "main").maybeSingle();
+    if (error) throw error;
+    const hasLocalChanges = localStorage.getItem(CLOUD_DIRTY_KEY) === "1";
+    const hasSyncedHere = localStorage.getItem(CLOUD_USER_KEY) === session.user.id;
+    if (remote) {
+      if (!validCloudState(remote.data)) throw new Error("雲端記錄格式不正確。");
+      if (!hasSyncedHere || hasLocalChanges) {
+        applyCloudState(mergeCloudState(remote.data, state));
+        cloudTimestamp = remote.updated_at;
+        cloudReady = true;
+        await syncCloudNow();
+      } else {
+        applyCloudState(remote.data);
+        cloudTimestamp = remote.updated_at;
+        cloudReady = true;
+      }
+    } else {
+      cloudReady = true;
+      cloudTimestamp = null;
+      localStorage.setItem(CLOUD_DIRTY_KEY, "1");
+      await syncCloudNow();
+    }
+    await uploadLocalSamples();
+    localStorage.setItem(CLOUD_USER_KEY, session.user.id);
+    $("#cloudGate").hidden = true;
+    $("#appShell").hidden = false;
+    $("#cloudSignOutButton").hidden = false;
+    if (cloudChannel) cloudClient.removeChannel(cloudChannel);
+    cloudChannel = cloudClient.channel("homework-shared-state")
+      .on("postgres_changes", { event: "*", schema: "public", table: CLOUD_TABLE, filter: "id=eq.main" }, (change) => {
+        const row = change.new;
+        if (!row?.data || row.updated_at === cloudTimestamp || cloudPending) return;
+        try {
+          applyCloudState(row.data);
+          cloudTimestamp = row.updated_at;
+          localStorage.removeItem(CLOUD_DIRTY_KEY);
+          render();
+          setCloudStatus("已接收其他裝置的更新。");
+        } catch (error) {
+          console.error("Unable to apply cloud update", error);
+          setCloudStatus("收到雲端更新，但資料格式無法讀取。");
+        }
+      })
+      .subscribe();
+    render();
+    if (!cloudPending) setCloudStatus("已同步 · " + new Date().toLocaleTimeString("zh-HK", { hour: "2-digit", minute: "2-digit" }));
+  }
+
+  function showCloudGate(message) {
+    $("#appShell").hidden = true;
+    $("#cloudGate").hidden = false;
+    $("#cloudLoginMessage").textContent = message || "";
+    $("#cloudSignOutButton").hidden = true;
+  }
+
+  async function initializeCloud() {
+    if (location.protocol === "file:") {
+      $("#appShell").hidden = false;
+      setCloudStatus("本機版 · 紀錄只儲存在此瀏覽器");
+      render();
+      return;
+    }
+    if (!window.supabase?.createClient) {
+      $("#cloudLoginButton").disabled = true;
+      showCloudGate("雲端同步程式未能載入。請檢查網絡連線後重新整理。");
+      return;
+    }
+    cloudClient = window.supabase.createClient(CLOUD_URL, CLOUD_KEY, {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
+    });
+    cloudClient.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_OUT") {
+        cloudReady = false;
+        cloudUserId = null;
+        showCloudGate("已登出。請使用教師帳戶登入以查看雲端紀錄。");
+      }
+    });
+    const { data, error } = await cloudClient.auth.getSession();
+    if (error) { showCloudGate("登入狀態讀取失敗，請重新整理。"); return; }
+    if (!data.session) {
+      showCloudGate("請使用已建立的教師帳戶登入。");
+      return;
+    }
+    try { await startCloudSession(data.session); }
+    catch (error) {
+      console.error("Unable to start cloud sync", error);
+      showCloudGate("雲端尚未準備好。請先在 Supabase 執行資料庫設定 SQL，並建立教師帳戶。");
     }
   }
 
@@ -148,9 +349,28 @@
     });
   }
 
-  const getSample = (id) => sampleOperation("readonly", id);
-  const putSample = (id, file) => sampleOperation("readwrite", id, file);
-  const deleteSample = (id) => sampleOperation("readwrite", id);
+  async function getSample(id) {
+    const local = await sampleOperation("readonly", id);
+    if (local || !cloudReady) return local;
+    const { data, error } = await cloudClient.storage.from(CLOUD_BUCKET).download(id);
+    if (error) throw error;
+    await sampleOperation("readwrite", id, data);
+    return data;
+  }
+  async function putSample(id, file) {
+    await sampleOperation("readwrite", id, file);
+    if (cloudReady) {
+      const { error } = await cloudClient.storage.from(CLOUD_BUCKET).upload(id, file, { upsert: true, contentType: file.type });
+      if (error) throw error;
+    }
+  }
+  async function deleteSample(id) {
+    if (cloudReady) {
+      const { error } = await cloudClient.storage.from(CLOUD_BUCKET).remove([id]);
+      if (error) throw error;
+    }
+    await sampleOperation("readwrite", id);
+  }
   const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
   const activeClass = () => state.classes.find((item) => item.id === activeClassId);
@@ -832,13 +1052,21 @@
       const backup = JSON.parse(await file.text());
       const data = backup?.data;
       if (backup?.format !== "homework-record-book" || backup.version !== 1 || !data || !Array.isArray(data.classes) || !Array.isArray(data.students) || !Array.isArray(data.assignments) || !Array.isArray(data.misses) || !Array.isArray(data.dailyRecords) || !Array.isArray(backup.samples)) throw new Error("Invalid backup");
-      if (!confirm("匯入備份會取代此瀏覽器現有的班別、學生及功課紀錄。確定繼續？")) return;
+      const confirmMessage = cloudReady
+        ? "匯入備份會取代目前雲端及此瀏覽器的班別、學生和功課紀錄。確定繼續？"
+        : "匯入備份會取代此瀏覽器現有的班別、學生及功課紀錄。確定繼續？";
+      if (!confirm(confirmMessage)) return;
       for (const item of backup.samples) {
         if (typeof item.assignmentId !== "string" || typeof item.data !== "string" || !data.assignments.some((assignment) => assignment.id === item.assignmentId)) throw new Error("Invalid sample");
         await putSample(item.assignmentId, dataUrlAsBlob(item.data));
       }
       data.rosterSeedVersion = 1;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      if (cloudReady) {
+        applyCloudState(data);
+        localStorage.setItem(CLOUD_DIRTY_KEY, "1");
+        await syncCloudNow();
+      }
       location.reload();
     } catch (error) {
       console.error("Unable to import backup", error);
@@ -968,8 +1196,41 @@
     const file = $("#assignmentSample").files[0];
     $("#selectedFile").textContent = file ? `已選擇：${file.name}` : "";
   });
+  $("#cloudLoginForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const button = $("#cloudLoginButton");
+    button.disabled = true;
+    $("#cloudLoginMessage").textContent = "正在登入…";
+    const { data, error } = await cloudClient.auth.signInWithPassword({
+      email: $("#cloudEmail").value.trim(),
+      password: $("#cloudPassword").value
+    });
+    if (error) {
+      $("#cloudLoginMessage").textContent = "登入失敗，請確認電郵、密碼及教師帳戶設定。";
+      button.disabled = false;
+      return;
+    }
+    try {
+      await startCloudSession(data.session);
+      $("#cloudPassword").value = "";
+      $("#cloudLoginMessage").textContent = "";
+    } catch (syncError) {
+      console.error("Unable to start cloud sync", syncError);
+      $("#cloudLoginMessage").textContent = "雲端未完成設定。請先執行 Supabase SQL 設定，並確認登入帳戶已建立。";
+    } finally {
+      button.disabled = false;
+    }
+  });
+  $("#cloudSignOutButton").addEventListener("click", async () => {
+    if (cloudPending || localStorage.getItem(CLOUD_DIRTY_KEY) === "1") await syncCloudNow();
+    const { error } = await cloudClient.auth.signOut();
+    if (error) toast("登出未能完成，請稍後再試。", true);
+  });
+  window.addEventListener("online", () => {
+    if (cloudReady && (cloudPending || localStorage.getItem(CLOUD_DIRTY_KEY) === "1")) queueCloudSave();
+  });
   $("#todayLabel").textContent = new Intl.DateTimeFormat("zh-HK", { year: "numeric", month: "long", day: "numeric", weekday: "long" }).format(new Date());
-  render();
+  initializeCloud();
 })();
 
 
