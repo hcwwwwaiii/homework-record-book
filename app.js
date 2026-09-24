@@ -515,15 +515,23 @@
   function saveStudents(event) {
     event.preventDefault();
     const names = $("#studentNames").value.split(/[\r\n]+/).map((name) => name.trim()).filter(Boolean);
-    const existing = new Set(classStudents().map((item) => item.name.toLocaleLowerCase()));
-    let added = 0;
-    for (const name of names) {
-      if (existing.has(name.toLocaleLowerCase())) continue;
-      state.students.push({ id: uid(), classId: activeClassId, name, longAbsent: false });
-      existing.add(name.toLocaleLowerCase());
-      added++;
-    }
-    if (!added) return toast("名單內的學生已經存在。", true);
+    const students = classStudents();
+    const existing = new Set(students.map((item) => item.name.toLocaleLowerCase()));
+    const newNames = names.filter((name) => {
+      const key = name.toLocaleLowerCase();
+      if (existing.has(key)) return false;
+      existing.add(key);
+      return true;
+    });
+    if (!newNames.length) return toast("名單內的學生已經存在。", true);
+    let nextOrder = Math.max(-1, ...students.map((student) => Number.isFinite(student.order) ? student.order : -1)) + 1;
+    students.forEach((student) => {
+      if (!Number.isFinite(student.order)) student.order = nextOrder++;
+    });
+    newNames.forEach((name) => {
+      state.students.push({ id: uid(), classId: activeClassId, name, longAbsent: false, order: nextOrder++ });
+    });
+    const added = newNames.length;
     if (!saveState()) return;
     closeDialog($("#studentDialog"));
     render();
