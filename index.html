@@ -7,9 +7,9 @@
   <meta name="description" content="記錄各班所有功課的收交情況、每日狀態與欠交警示。">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23183b3b'/%3E%3Cpath d='M19 16h21l7 7v25H19z' fill='none' stroke='%23f4e9cc' stroke-width='4'/%3E%3Cpath d='M27 33h13M27 41h9' stroke='%23f4e9cc' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
   <title>功課記錄簿</title>
-  <link rel="stylesheet" href="styles.css?v=9151c7af">
+  <link rel="stylesheet" href="styles.css?v=d3df5025">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-  <script src="app.js?v=ddf425ca" defer></script>
+  <script src="app.js?v=a1192b78" defer></script>
 </head>
 <body>
   <div class="app-shell" id="appShell" hidden>
@@ -74,7 +74,7 @@
         <div class="section-heading"><div><p class="eyebrow">學生表現</p><h2 id="recordsTitle">欠交記錄</h2></div></div>
         <div class="records-grid">
           <section class="record-panel" aria-labelledby="warningRecordsTitle">
-            <div class="record-panel-heading"><h3 id="warningRecordsTitle">待處理警示</h3><span>每 5 次欠交產生 1 次</span></div>
+            <div class="record-panel-heading"><h3 id="warningRecordsTitle">警示學生</h3><span>每 5 次欠交產生 1 次</span></div>
             <div id="warningRecords"></div>
           </section>
           <section class="record-panel" aria-labelledby="excellentRecordsTitle">
@@ -83,7 +83,8 @@
             <details id="excellentDetails" class="excellent-details"><summary><span id="excellentSummary">展開學生名單</span><span class="excellent-chevron" aria-hidden="true">⌄</span></summary><div id="excellentRecords" class="excellent-scroll"></div></details>
           </section>
           <section class="record-panel missing-record-panel" aria-labelledby="missingRecordsTitle">
-            <div class="record-panel-heading"><h3 id="missingRecordsTitle">欠交明細</h3><span id="missingRecordsCount"></span></div>
+            <div class="record-panel-heading"><h3 id="missingRecordsTitle">學生欠交紀錄</h3><span id="missingRecordsCount"></span></div>
+            <p class="record-panel-intro">按學生查看欠交次數、功課及每次記錄日期。</p>
             <div id="missingRecords"></div>
           </section>
         </div>

@@ -681,16 +681,19 @@
   }
 
   function renderRecords() {
+    const openWarnings = new Set([...document.querySelectorAll("#warningRecords .warning-history[open]")].map((node) => node.closest("[data-warning-student]")?.dataset.warningStudent));
+    const openStudents = new Set([...document.querySelectorAll("#missingRecords .student-record[open]")].map((node) => node.dataset.recordStudent));
     const warnings = sortedStudents().map((student) => ({ student, missing: studentMisses(student.id).length, progress: warningProgress(student.id) }))
       .filter((item) => item.progress.earned > 0)
       .sort((a, b) => b.progress.pending - a.progress.pending || b.missing - a.missing || a.student.name.localeCompare(b.student.name, "zh-Hant"));
     $("#warningRecords").innerHTML = warnings.length ? '<div class="warning-student-list">' + warnings.map(({ student, missing, progress }) => {
       const missHistory = studentMisses(student.id).sort((a, b) => b.date.localeCompare(a.date)).map((entry) => {
         const assignment = state.assignments.find((item) => item.id === entry.assignmentId);
-        return '<li><time datetime="' + esc(entry.date) + '">' + esc(entry.date) + '</time><span>' + esc(assignment?.title || "已移除功課") + '</span></li>';
+        const label = assignment ? topicLabel(assignment) + " · " + assignment.title : "已移除功課";
+        return '<li><time datetime="' + esc(entry.date) + '">' + esc(entry.date) + '</time><span>' + esc(label) + '</span></li>';
       }).join("");
-      const handledHistory = progress.handled.map((entry) => '<li><span>第 ' + entry.warningNumber + ' 次警示 · ' + esc(localDateFromTimestamp(entry.handledAt)) + ' 已處理</span><button class="text-button" type="button" data-action="undo-warning" data-id="' + esc(entry.id) + '">撤回</button></li>').join("");
-      return '<article class="warning-student"><div class="warning-student-top"><div><strong>' + esc(student.name) + '</strong><small>累計欠交 ' + missing + ' 次 · 已產生 ' + progress.earned + ' 次警示</small></div><span class="warning-badge ' + (progress.pending ? "" : "none") + '">' + progress.pending + ' 次待處理</span></div>' + (progress.pending ? '<button class="small-button warning-handle-button" type="button" data-action="handle-warning" data-id="' + esc(student.id) + '">標記已處理 1 次</button>' : "") + '<details class="warning-history"><summary>查看欠交日期及處理紀錄</summary><ul>' + missHistory + handledHistory + '</ul></details></article>';
+      const handledHistory = progress.handled.map((entry) => '<li class="handled-entry"><span>第 ' + entry.warningNumber + ' 次警示 · ' + esc(localDateFromTimestamp(entry.handledAt)) + ' 已處理</span><button class="text-button" type="button" data-action="undo-warning" data-id="' + esc(entry.id) + '">撤回</button></li>').join("");
+      return '<article class="warning-student ' + (progress.pending ? "has-pending" : "is-handled") + '" data-warning-student="' + esc(student.id) + '"><div class="warning-student-top"><div><strong>' + esc(student.name) + '</strong><small>累計欠交 ' + missing + ' 次 · 已產生 ' + progress.earned + ' 次警示</small></div><span class="warning-badge ' + (progress.pending ? "" : "none") + '">' + (progress.pending ? progress.pending + " 次待處理" : "全部已處理") + '</span></div>' + (progress.pending ? '<button class="small-button warning-handle-button" type="button" data-action="handle-warning" data-id="' + esc(student.id) + '">標記已處理 1 次</button>' : "") + '<details class="warning-history" ' + (openWarnings.has(student.id) ? "open" : "") + '><summary>查看欠交日期及處理紀錄</summary><ul>' + missHistory + handledHistory + '</ul></details></article>';
     }).join("") + '</div>' : '<p class="record-empty">這個班別暫時沒有警示學生。</p>';
     $("#recordsMonth").value = selectedRecordsMonth;
     const excellent = monthlyExcellentStudents(selectedRecordsMonth);
@@ -699,12 +702,23 @@
     const missing = classMisses().slice().sort((a, b) => b.date.localeCompare(a.date) || (b.recordedAt || "").localeCompare(a.recordedAt || ""));
     const studentsById = new Map(state.students.map((student) => [student.id, student]));
     const assignmentsById = new Map(state.assignments.map((assignment) => [assignment.id, assignment]));
-    $("#missingRecordsCount").textContent = "共 " + missing.length + " 筆";
-    $("#missingRecords").innerHTML = missing.length ? '<ul class="record-list missing-record-list">' + missing.map((entry) => {
-      const student = studentsById.get(entry.studentId);
-      const assignment = assignmentsById.get(entry.assignmentId);
-      return '<li><span><strong>' + esc(student?.name || "已移除學生") + '</strong><small>' + esc(assignment?.title || "已移除功課") + '</small></span><time datetime="' + esc(entry.date) + '">記錄日期 ' + esc(entry.date) + '</time></li>';
-    }).join("") + '</ul>' : '<p class="record-empty">這個班別暫時沒有欠交記錄。</p>';
+    const byStudent = new Map();
+    missing.forEach((entry) => {
+      if (!byStudent.has(entry.studentId)) byStudent.set(entry.studentId, { student: studentsById.get(entry.studentId), studentId: entry.studentId, entries: [] });
+      byStudent.get(entry.studentId).entries.push(entry);
+    });
+    const studentGroups = [...byStudent.values()].sort((a, b) => b.entries.length - a.entries.length || b.entries[0].date.localeCompare(a.entries[0].date) || (a.student?.name || "").localeCompare(b.student?.name || "", "zh-Hant"));
+    $("#missingRecordsCount").textContent = missing.length + " 筆 · " + studentGroups.length + " 位學生";
+    $("#missingRecords").innerHTML = studentGroups.length ? '<div class="student-record-grid">' + studentGroups.map((group) => {
+      const latestDate = group.entries[0].date;
+      const events = group.entries.map((entry) => {
+        const assignment = assignmentsById.get(entry.assignmentId);
+        const title = assignment?.title || "已移除功課";
+        const detail = assignment ? [topicLabel(assignment), assignment.detailTopic].filter(Boolean).join(" · ") : "";
+        return '<li><time datetime="' + esc(entry.date) + '">' + esc(entry.date) + '</time><span><strong>' + esc(title) + '</strong>' + (detail ? '<small>' + esc(detail) + '</small>' : "") + '</span></li>';
+      }).join("");
+      return '<details class="student-record" data-record-student="' + esc(group.studentId) + '" ' + (openStudents.has(group.studentId) ? "open" : "") + '><summary><span class="student-record-identity"><strong>' + esc(group.student?.name || "已移除學生") + '</strong><small>最近記錄 <time datetime="' + esc(latestDate) + '">' + esc(latestDate) + '</time></small></span><span class="student-record-tail"><span class="student-record-count">' + group.entries.length + ' 次欠交</span><span class="student-record-chevron" aria-hidden="true">⌄</span></span></summary><ol class="student-record-events">' + events + '</ol></details>';
+    }).join("") + '</div>' : '<p class="record-empty">這個班別暫時沒有欠交記錄。</p>';
   }
 
   function handleWarning(studentId) {
