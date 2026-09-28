@@ -58,7 +58,7 @@
   let cloudUserId = null;
   const state = loadState();
   let activeClassId = DEFAULT_CLASSES[0].id;
-  let activeView = "assignments";
+  let activeView = "today";
   let objectUrls = [];
   let previewUrl = null;
   let renderSerial = 0;
@@ -82,13 +82,14 @@
           dailyRecords: Array.isArray(stored.dailyRecords) ? stored.dailyRecords : [],
           dailyRecordVersion: stored.dailyRecordVersion || 0,
           excellentByMonth: Array.isArray(stored.excellentByMonth) ? stored.excellentByMonth : [],
+          warningsHandled: Array.isArray(stored.warningsHandled) ? stored.warningsHandled : [],
           rosterSeedVersion: stored.rosterSeedVersion || 0
         };
       }
     } catch (error) {
       console.warn("Unable to read saved records", error);
     }
-    if (!result) result = { classes: DEFAULT_CLASSES.map((item) => ({ ...item })), students: [], assignments: [], misses: [], absences: [], dailyRecords: [], dailyRecordVersion: 1, excellentByMonth: [], rosterSeedVersion: 0 };
+    if (!result) result = { classes: DEFAULT_CLASSES.map((item) => ({ ...item })), students: [], assignments: [], misses: [], absences: [], dailyRecords: [], dailyRecordVersion: 1, excellentByMonth: [], warningsHandled: [], rosterSeedVersion: 0 };
     if (result.dailyRecordVersion < 1) {
       for (const miss of result.misses) {
         const firstDate = localDateFromTimestamp(miss.createdAt);
@@ -157,7 +158,7 @@
 
   function mergeCloudState(remote, local) {
     const merged = { ...remote, ...local };
-    const collections = ["classes", "students", "assignments", "misses", "absences", "dailyRecords", "excellentByMonth"];
+    const collections = ["classes", "students", "assignments", "misses", "absences", "dailyRecords", "excellentByMonth", "warningsHandled"];
     for (const key of collections) {
       const byId = new Map();
       for (const item of [...(remote[key] || []), ...(local[key] || [])]) {
@@ -383,6 +384,12 @@
   const assignmentMisses = (id) => state.dailyRecords.filter((item) => item.assignmentId === id && item.status === "missing");
   const assignmentEntries = (id) => state.dailyRecords.filter((item) => item.assignmentId === id);
   const firstDayEntry = (assignment, studentId) => state.dailyRecords.find((item) => item.assignmentId === assignment.id && item.studentId === studentId && item.date === assignment.firstRecordedOn);
+  function warningProgress(studentId) {
+    const earned = Math.floor(studentMisses(studentId).length / 5);
+    const handled = (state.warningsHandled || []).filter((item) => item.studentId === studentId && item.warningNumber <= earned && !item.revokedAt);
+    const handledNumbers = new Set(handled.map((item) => item.warningNumber));
+    return { earned, handled, pending: Math.max(0, earned - handledNumbers.size), next: Array.from({ length: earned }, (_, index) => index + 1).find((number) => !handledNumbers.has(number)) };
+  }
   function latestEntry(assignmentId, studentId, untilDate) {
     return assignmentEntries(assignmentId).filter((item) => item.studentId === studentId && (!untilDate || item.date <= untilDate)).sort((a, b) => a.date.localeCompare(b.date) || (a.recordedAt || "").localeCompare(b.recordedAt || "") || a.id.localeCompare(b.id)).at(-1);
   }
@@ -498,7 +505,51 @@
     $("#overviewTitle").textContent = activeClass().name;
     $("#outstandingCount").textContent = classAssignments().filter((item) => !item.archivedAt).reduce((sum, assignment) => sum + assignmentStudents(assignment).filter((student) => isOutstanding(assignment, student)).length, 0);
     $("#missCount").textContent = classMisses().length;
-    $("#warningCount").textContent = classStudents().reduce((sum, student) => sum + Math.floor(studentMisses(student.id).length / 5), 0);
+    $("#warningCount").textContent = classStudents().reduce((sum, student) => sum + warningProgress(student.id).pending, 0);
+  }
+
+  function renderToday() {
+    const date = todayDate();
+    const groups = state.classes.map((classItem) => {
+      const assignments = state.assignments.filter((assignment) => assignment.classId === classItem.id && !assignment.archivedAt);
+      const pending = assignments.map((assignment) => ({
+        assignment,
+        students: assignmentStudents(assignment).filter((student) => isOutstanding(assignment, student))
+      })).filter((item) => item.students.length);
+      const unrecorded = assignments.filter((assignment) => !assignment.firstRecordedOn);
+      return { classItem, pending, unrecorded, count: pending.reduce((sum, item) => sum + item.students.length, 0) };
+    });
+    const total = groups.reduce((sum, item) => sum + item.count, 0);
+    $("#todayPendingCount").textContent = total + " 份待交";
+    $("#todayContent").innerHTML = groups.map(({ classItem, pending, unrecorded, count }) => {
+      const cards = pending.map(({ assignment, students }) => {
+        const rows = students.map((student) => {
+          const latest = latestEntry(assignment.id, student.id);
+          const todayRecord = latest?.date === date ? latest.status : "";
+          const assignmentCount = assignmentMisses(assignment.id).filter((item) => item.studentId === student.id).length;
+          const status = todayRecord === "missing" ? "今日已記欠交" : todayRecord === "absent" ? "今日已記缺席" : latest?.status === "absent" ? "上次缺席" : "仍待補交";
+          return '<div class="today-row"><div class="today-person"><strong>' + esc(student.name) + '</strong><small>' + esc(studentDetail(student)) + '</small></div><div class="today-row-meta"><span class="tracking-status ' + (latest?.status === "absent" ? "absent" : "pending") + '">' + status + '</span><small>本份累計欠交 ' + assignmentCount + ' 次 · 上次記錄 ' + esc(latest?.date || "—") + '</small></div><div class="today-actions" role="group" aria-label="' + esc(student.name) + ' ' + esc(assignment.title) + ' 今日狀態"><button class="small-button" type="button" data-action="today-status" data-status="submitted" data-id="' + esc(assignment.id) + '" data-student-id="' + esc(student.id) + '">已補交</button><button class="small-button" type="button" data-action="today-status" data-status="absent" data-id="' + esc(assignment.id) + '" data-student-id="' + esc(student.id) + '" ' + (todayRecord === "absent" ? "disabled" : "") + '>缺席</button><button class="small-button today-missing-button" type="button" data-action="today-status" data-status="missing" data-id="' + esc(assignment.id) + '" data-student-id="' + esc(student.id) + '" ' + (todayRecord === "missing" ? "disabled" : "") + '>仍欠交</button></div></div>';
+        }).join("");
+        return '<article class="today-card"><div class="today-card-heading"><div><p class="assignment-meta">' + esc(topicLabel(assignment)) + ' · 繳交日期 ' + esc(formatDate(assignment.due)) + '</p><h4>' + esc(assignment.title) + '</h4></div><span class="status-pill">' + students.length + ' 份待交</span></div>' + rows + '</article>';
+      }).join("");
+      const unrecordedList = unrecorded.length ? '<div class="today-unrecorded"><strong>' + unrecorded.length + ' 份功課尚未記錄首次收交</strong>' + unrecorded.map((assignment) => '<button class="small-button" type="button" data-action="add-missing" data-id="' + esc(assignment.id) + '">' + esc(assignment.title) + ' · 開始記錄</button>').join("") + '</div>' : "";
+      return '<section class="today-class" aria-label="' + esc(classItem.name) + '"><div class="today-class-heading"><h3>' + esc(classItem.name) + '</h3><span>' + count + ' 份待交</span></div>' + (cards || '<p class="record-empty">目前沒有待交功課。</p>') + unrecordedList + '</section>';
+    }).join("");
+  }
+
+  function recordTodayStatus(assignmentId, studentId, status) {
+    if (!["submitted", "absent", "missing"].includes(status)) return;
+    const assignment = state.assignments.find((item) => item.id === assignmentId);
+    const student = state.students.find((item) => item.id === studentId);
+    const date = todayDate();
+    if (!assignment || !student || assignment.archivedAt || !assignment.firstRecordedOn || assignment.firstRecordedOn > date || !isOutstanding(assignment, student)) return toast("此學生目前沒有這份待交功課，請重新整理。", true);
+    const before = warningProgress(studentId).earned;
+    const previousRecords = state.dailyRecords;
+    upsertDailyRecord(assignment, studentId, date, status);
+    if (!saveState()) { state.dailyRecords = previousRecords; return; }
+    render();
+    const label = { submitted: "已補交", absent: "今日缺席", missing: "今日仍欠交" }[status];
+    toast(student.name + ' · ' + assignment.title + '：' + label + (warningProgress(studentId).earned > before ? '；達到新警示。' : '。'));
   }
 
   function releaseCardUrls() {
@@ -578,9 +629,9 @@
     container.innerHTML = '<div class="roster"><div class="roster-summary">共 ' + students.length + ' 位學生 · ' + absentCount + ' 位長缺 · 每 5 次未交記錄計 1 次警示</div><table class="roster-table"><thead><tr><th scope="col">學生</th><th scope="col">待交</th><th scope="col">累計欠交</th><th scope="col">警示</th><th scope="col">課業管理</th><th scope="col"></th></tr></thead><tbody>' + students.map((student) => {
       const misses = studentMisses(student.id);
       const pending = classAssignments().filter((assignment) => !assignment.archivedAt && isOutstanding(assignment, student)).length;
-      const warnings = Math.floor(misses.length / 5);
+      const warning = warningProgress(student.id);
       const toward = misses.length % 5;
-      return '<tr><td class="student-name">' + esc(student.name) + (student.longAbsent ? ' <span class="long-absent-badge">長缺</span>' : "") + '</td><td><span class="count">' + pending + '</span></td><td><span class="count">' + misses.length + '</span><div class="progress-track" role="progressbar" aria-label="距離下一次警示" aria-valuenow="' + toward + '" aria-valuemin="0" aria-valuemax="5"><div class="progress-fill" style="width:' + (toward * 20) + '%"></div></div><span class="subtle">距下次警示還差 ' + (5 - toward) + ' 次</span></td><td><span class="warning-badge ' + (warnings ? "" : "none") + '">' + warnings + ' 次警示</span></td><td><button class="long-absent-toggle ' + (student.longAbsent ? "active" : "") + '" type="button" data-action="toggle-long-absent" data-id="' + esc(student.id) + '" aria-pressed="' + Boolean(student.longAbsent) + '">' + (student.longAbsent ? "取消長缺" : "設為長缺") + '</button></td><td class="row-actions"><button type="button" data-action="delete-student" data-id="' + esc(student.id) + '" aria-label="移除 ' + esc(student.name) + '">移除</button></td></tr>';
+      return '<tr><td class="student-name">' + esc(student.name) + (student.longAbsent ? ' <span class="long-absent-badge">長缺</span>' : "") + '</td><td><span class="count">' + pending + '</span></td><td><span class="count">' + misses.length + '</span><div class="progress-track" role="progressbar" aria-label="距離下一次警示" aria-valuenow="' + toward + '" aria-valuemin="0" aria-valuemax="5"><div class="progress-fill" style="width:' + (toward * 20) + '%"></div></div><span class="subtle">距下次警示還差 ' + (5 - toward) + ' 次</span></td><td><span class="warning-badge ' + (warning.pending ? "" : "none") + '">' + warning.pending + ' 次待處理</span>' + (warning.earned > warning.pending ? '<small class="student-detail">已處理 ' + (warning.earned - warning.pending) + ' 次</small>' : "") + '</td><td><button class="long-absent-toggle ' + (student.longAbsent ? "active" : "") + '" type="button" data-action="toggle-long-absent" data-id="' + esc(student.id) + '" aria-pressed="' + Boolean(student.longAbsent) + '">' + (student.longAbsent ? "取消長缺" : "設為長缺") + '</button></td><td class="row-actions"><button type="button" data-action="delete-student" data-id="' + esc(student.id) + '" aria-label="移除 ' + esc(student.name) + '">移除</button></td></tr>';
     }).join("") + '</tbody></table></div>';
     container.querySelectorAll(".student-name").forEach((cell, index) => {
       const detail = studentDetail(students[index]);
@@ -602,14 +653,20 @@
   }
 
   function renderRecords() {
-    const warnings = sortedStudents().map((student) => ({
-      student,
-      missing: studentMisses(student.id).length,
-      count: Math.floor(studentMisses(student.id).length / 5)
-    })).filter((item) => item.count > 0).sort((a, b) => b.count - a.count || b.missing - a.missing || a.student.name.localeCompare(b.student.name, "zh-Hant"));
-    $("#warningRecords").innerHTML = warnings.length ? '<ul class="record-list">' + warnings.map((item) => '<li><span><strong>' + esc(item.student.name) + '</strong><small>累計欠交 ' + item.missing + ' 次</small></span><span class="warning-badge">' + item.count + ' 次警示</span></li>').join("") + '</ul>' : '<p class="record-empty">這個班別暫時沒有警示學生。</p>';
+    const warnings = sortedStudents().map((student) => ({ student, missing: studentMisses(student.id).length, progress: warningProgress(student.id) }))
+      .filter((item) => item.progress.earned > 0)
+      .sort((a, b) => b.progress.pending - a.progress.pending || b.missing - a.missing || a.student.name.localeCompare(b.student.name, "zh-Hant"));
+    $("#warningRecords").innerHTML = warnings.length ? '<div class="warning-student-list">' + warnings.map(({ student, missing, progress }) => {
+      const missHistory = studentMisses(student.id).sort((a, b) => b.date.localeCompare(a.date)).map((entry) => {
+        const assignment = state.assignments.find((item) => item.id === entry.assignmentId);
+        return '<li><time datetime="' + esc(entry.date) + '">' + esc(entry.date) + '</time><span>' + esc(assignment?.title || "已移除功課") + '</span></li>';
+      }).join("");
+      const handledHistory = progress.handled.map((entry) => '<li><span>第 ' + entry.warningNumber + ' 次警示 · ' + esc(localDateFromTimestamp(entry.handledAt)) + ' 已處理</span><button class="text-button" type="button" data-action="undo-warning" data-id="' + esc(entry.id) + '">撤回</button></li>').join("");
+      return '<article class="warning-student"><div class="warning-student-top"><div><strong>' + esc(student.name) + '</strong><small>累計欠交 ' + missing + ' 次 · 已產生 ' + progress.earned + ' 次警示</small></div><span class="warning-badge ' + (progress.pending ? "" : "none") + '">' + progress.pending + ' 次待處理</span></div>' + (progress.pending ? '<button class="small-button warning-handle-button" type="button" data-action="handle-warning" data-id="' + esc(student.id) + '">標記已處理 1 次</button>' : "") + '<details class="warning-history"><summary>查看欠交日期及處理紀錄</summary><ul>' + missHistory + handledHistory + '</ul></details></article>';
+    }).join("") + '</div>' : '<p class="record-empty">這個班別暫時沒有警示學生。</p>';
     $("#recordsMonth").value = selectedRecordsMonth;
     const excellent = monthlyExcellentStudents(selectedRecordsMonth);
+    $("#excellentSummary").textContent = "查看學生名單（" + excellent.length + " 位）";
     $("#excellentRecords").innerHTML = excellent.length ? '<ul class="record-list">' + excellent.map((item) => '<li><strong>' + esc(item.student.name) + '</strong><span class="excellent-count">欠交 ' + item.missing + ' 次</span></li>').join("") + '</ul>' : '<p class="record-empty">這個月份暫時沒有符合條件的學生。</p>';
     const missing = classMisses().slice().sort((a, b) => b.date.localeCompare(a.date) || (b.recordedAt || "").localeCompare(a.recordedAt || ""));
     const studentsById = new Map(state.students.map((student) => [student.id, student]));
@@ -622,9 +679,41 @@
     }).join("") + '</ul>' : '<p class="record-empty">這個班別暫時沒有欠交記錄。</p>';
   }
 
+  function handleWarning(studentId) {
+    const student = state.students.find((item) => item.id === studentId && item.classId === activeClassId);
+    if (!student) return;
+    const number = warningProgress(studentId).next;
+    if (!number) return;
+    if (!Array.isArray(state.warningsHandled)) state.warningsHandled = [];
+    const id = "warning-" + studentId + "-" + number;
+    const previous = state.warningsHandled.find((item) => item.id === id);
+    const oldRecord = previous ? { ...previous } : null;
+    if (previous) { previous.handledAt = new Date().toISOString(); previous.revokedAt = null; }
+    else state.warningsHandled.push({ id, studentId, warningNumber: number, handledAt: new Date().toISOString() });
+    if (!saveState()) {
+      if (previous) Object.assign(previous, oldRecord);
+      else state.warningsHandled = state.warningsHandled.filter((item) => item.id !== id);
+      return;
+    }
+    render();
+    toast(student.name + " 的第 " + number + " 次警示已標記處理。");
+  }
+
+  function undoWarning(id) {
+    const record = (state.warningsHandled || []).find((item) => item.id === id && !item.revokedAt);
+    if (!record || !state.students.some((student) => student.id === record.studentId && student.classId === activeClassId)) return;
+    record.revokedAt = new Date().toISOString();
+    if (!saveState()) { delete record.revokedAt; return; }
+    render();
+    toast("已撤回這次警示的處理標記。");
+  }
+
   function render() {
     renderTabs();
     renderOverview();
+    $(".class-section").hidden = activeView === "today";
+    $(".overview").hidden = activeView === "today";
+    $("#todayView").hidden = activeView !== "today";
     $("#assignmentsView").hidden = activeView !== "assignments";
     $("#studentsView").hidden = activeView !== "students";
     $("#archiveView").hidden = activeView !== "archive";
@@ -634,7 +723,8 @@
     else {
       ++renderSerial;
       releaseCardUrls();
-      if (activeView === "students") renderStudents();
+      if (activeView === "today") renderToday();
+      else if (activeView === "students") renderStudents();
       else if (activeView === "archive") renderArchive();
       else renderRecords();
     }
@@ -775,6 +865,7 @@
   function openMissingForm(assignmentId, editExisting = false) {
     const assignment = state.assignments.find((item) => item.id === assignmentId);
     if (!assignment || assignment.archivedAt || (editExisting ? !assignment.firstRecordedOn : Boolean(assignment.firstRecordedOn))) return;
+    activeClassId = assignment.classId;
     if (!classStudents().length) { activeView = "students"; render(); openStudentForm(); return; }
     if (!assignmentStudents(assignment).length) return toast("這份功課沒有需要管理的學生。", true);
     $("#missingAssignmentId").value = assignmentId;
@@ -963,9 +1054,9 @@
         const choice = selectedDailyStatuses.get(student.id);
         const entries = assignmentEntries(assignmentId).filter((item) => item.studentId === student.id).sort((a, b) => b.date.localeCompare(a.date) || (b.recordedAt || "").localeCompare(a.recordedAt || ""));
         const count = entries.filter((item) => item.status === "missing").length;
-        const warnings = Math.floor(studentMisses(student.id).length / 5);
+        const warnings = warningProgress(student.id).pending;
         const history = entries.map((entry) => '<li><time>' + entry.date + '</time><span>' + ({ missing: "未交", submitted: "已交", absent: "缺席" }[entry.status] || entry.status) + '</span></li>').join("");
-        return '<div class="tracking-row daily-row"><div class="tracking-person"><strong>' + esc(student.name) + '</strong><small>' + esc(studentDetail(student)) + '</small></div><div class="tracking-info"><span class="tracking-status ' + (prior?.status === "absent" ? "absent" : "pending") + '">' + (prior?.status === "absent" ? "上次缺席" : "仍待補交") + '</span><small>本份功課累計欠交 ' + count + ' 次 · 所有功課合計 ' + warnings + ' 次警示</small></div><div class="daily-options" role="group" aria-label="' + esc(student.name) + ' 當日狀態"><label><input type="checkbox" data-daily-student="' + esc(student.id) + '" value="submitted" ' + (choice === "submitted" ? "checked" : "") + '> 已補交</label><label><input type="checkbox" data-daily-student="' + esc(student.id) + '" value="absent" ' + (choice === "absent" ? "checked" : "") + '> 缺席</label></div><details class="daily-history"><summary>查看每日記錄（' + entries.length + '）</summary><ul>' + history + '</ul></details></div>';
+        return '<div class="tracking-row daily-row"><div class="tracking-person"><strong>' + esc(student.name) + '</strong><small>' + esc(studentDetail(student)) + '</small></div><div class="tracking-info"><span class="tracking-status ' + (prior?.status === "absent" ? "absent" : "pending") + '">' + (prior?.status === "absent" ? "上次缺席" : "仍待補交") + '</span><small>本份功課累計欠交 ' + count + ' 次 · 所有功課合計 ' + warnings + ' 次待處理警示</small></div><div class="daily-options" role="group" aria-label="' + esc(student.name) + ' 當日狀態"><label><input type="checkbox" data-daily-student="' + esc(student.id) + '" value="submitted" ' + (choice === "submitted" ? "checked" : "") + '> 已補交</label><label><input type="checkbox" data-daily-student="' + esc(student.id) + '" value="absent" ' + (choice === "absent" ? "checked" : "") + '> 缺席</label></div><details class="daily-history"><summary>查看每日記錄（' + entries.length + '）</summary><ul>' + history + '</ul></details></div>';
       }).join("") : '<div class="check-empty">' + (valid && candidates.length === 0 ? "這天沒有待交學生" : valid ? "找不到符合的學生" : "請選擇有效日期") + '</div>';
     }
     container.scrollTop = previousScroll;
@@ -1050,6 +1141,7 @@
     state.absences = state.absences.filter((item) => item.studentId !== id);
     state.dailyRecords = state.dailyRecords.filter((item) => item.studentId !== id);
     state.excellentByMonth = state.excellentByMonth.filter((item) => item.studentId !== id);
+    state.warningsHandled = (state.warningsHandled || []).filter((item) => item.studentId !== id);
     state.assignments.forEach((assignment) => { if (assignment.excludedStudentIds) assignment.excludedStudentIds = assignment.excludedStudentIds.filter((studentId) => studentId !== id); });
     if (!saveState()) return;
     render();
@@ -1191,6 +1283,9 @@
       case "add-missing": openMissingForm(id); break;
       case "edit-first-record": openMissingForm(id, true); break;
       case "open-tracking": openTracking(id); break;
+      case "today-status": recordTodayStatus(id, button.dataset.studentId, button.dataset.status); break;
+      case "handle-warning": handleWarning(id); break;
+      case "undo-warning": undoWarning(id); break;
     }
   });
 

@@ -16,7 +16,8 @@
     <aside class="sidebar" aria-label="網站導覽">
       <div class="brand"><span class="brand-mark" aria-hidden="true">欠</span><span><strong>功課記錄簿</strong><small>全班功課紀錄</small></span></div>
       <nav class="side-nav" aria-label="頁面">
-        <button class="nav-link active" data-view="assignments" type="button"><span aria-hidden="true">▦</span> 功課紀錄</button>
+        <button class="nav-link active" data-view="today" type="button"><span aria-hidden="true">◉</span> 今日追收</button>
+        <button class="nav-link" data-view="assignments" type="button"><span aria-hidden="true">▦</span> 功課紀錄</button>
         <button class="nav-link" data-view="students" type="button"><span aria-hidden="true">◫</span> 學生名單</button>
         <button class="nav-link" data-view="archive" type="button"><span aria-hidden="true">▣</span> 已封存</button>
         <button class="nav-link" data-view="records" type="button"><span aria-hidden="true">◎</span> 欠交記錄</button>
@@ -38,12 +39,18 @@
       </section>
 
       <section class="overview" aria-labelledby="overviewTitle">
-        <div class="overview-heading"><div><p class="eyebrow" id="subjectLabel"></p><h2 id="overviewTitle"></h2></div><p class="overview-hint">每累積 5 次未交記錄，記 1 次警示</p></div>
+        <div class="overview-heading"><div><p class="eyebrow" id="subjectLabel"></p><h2 id="overviewTitle"></h2></div><p class="overview-hint">每累積 5 次未交記錄，產生 1 次警示</p></div>
         <div class="stats-grid">
           <div class="stat-card"><span>待交功課</span><strong id="outstandingCount">0</strong><small>現行功課尚未交回</small></div>
           <div class="stat-card"><span>累計欠交</span><strong id="missCount">0</strong><small>按學生每日未交次數計算</small></div>
-          <div class="stat-card warning-stat"><span>累計警示</span><strong id="warningCount">0</strong><small>每位學生每 5 次未交計 1 次</small></div>
+          <div class="stat-card warning-stat"><span>待處理警示</span><strong id="warningCount">0</strong><small>處理後保留原有欠交紀錄</small></div>
         </div>
+      </section>
+
+      <section id="todayView" class="workspace" aria-labelledby="todayTitle" hidden>
+        <div class="section-heading"><div><p class="eyebrow">三班集中處理</p><h2 id="todayTitle">今日追收總覽</h2></div><span id="todayPendingCount" class="today-total"></span></div>
+        <p class="today-intro">只顯示現行功課中仍待交的學生。每次操作只更新該學生的這份功課；同一天重按會修正當天狀態，不會重複計欠交。</p>
+        <div id="todayContent" class="today-content"></div>
       </section>
 
       <section id="assignmentsView" class="workspace" aria-labelledby="assignmentsTitle">
@@ -65,13 +72,13 @@
         <div class="section-heading"><div><p class="eyebrow">學生表現</p><h2 id="recordsTitle">欠交記錄</h2></div></div>
         <div class="records-grid">
           <section class="record-panel" aria-labelledby="warningRecordsTitle">
-            <div class="record-panel-heading"><h3 id="warningRecordsTitle">警示學生</h3><span>累計每 5 次欠交記 1 次</span></div>
+            <div class="record-panel-heading"><h3 id="warningRecordsTitle">待處理警示</h3><span>每 5 次欠交產生 1 次</span></div>
             <div id="warningRecords"></div>
           </section>
           <section class="record-panel" aria-labelledby="excellentRecordsTitle">
-            <div class="record-panel-heading"><h3 id="excellentRecordsTitle">每月表現優異</h3><label class="month-control">月份 <input id="recordsMonth" type="month"></label></div>
+            <div class="record-panel-heading"><h3 id="excellentRecordsTitle">每月表現良好</h3><label class="month-control">月份 <input id="recordsMonth" type="month"></label></div>
             <p class="form-note">自動列出本月有已交或未交記錄、欠交不多於 2 次的學生；缺席不計欠交。</p>
-            <div id="excellentRecords"></div>
+            <details id="excellentDetails" class="excellent-details"><summary><span id="excellentSummary">展開學生名單</span><span class="excellent-chevron" aria-hidden="true">⌄</span></summary><div id="excellentRecords" class="excellent-scroll"></div></details>
           </section>
           <section class="record-panel missing-record-panel" aria-labelledby="missingRecordsTitle">
             <div class="record-panel-heading"><h3 id="missingRecordsTitle">欠交明細</h3><span id="missingRecordsCount"></span></div>
