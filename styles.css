@@ -130,3 +130,13 @@
 .cloud-login .primary-button{width:100%;margin-top:4px}
 .cloud-login-message{font-size:12px;color:#a55141;line-height:1.6;min-height:20px;margin:14px 0 0}
 @media(max-width:520px){.cloud-gate{padding:16px}.cloud-login{padding:25px 20px}}
+
+/* First-day corrections and dated missing records */
+#firstRecordDate:disabled{background:#edf1ec;color:#607769}
+.missing-record-panel{grid-column:1 / -1}
+.missing-record-list{max-height:520px;overflow:auto;margin:0}
+.missing-record-list li{align-items:flex-start}
+.missing-record-list li span{min-width:0}
+.missing-record-list li small{overflow-wrap:anywhere}
+.missing-record-list time{flex:none;color:#557360;font-size:12px;font-weight:750;white-space:nowrap}
+@media(max-width:480px){.missing-record-list li{flex-direction:column;gap:3px}}

@@ -73,6 +73,10 @@
             <p class="form-note">自動列出本月有已交或未交記錄、欠交不多於 2 次的學生；缺席不計欠交。</p>
             <div id="excellentRecords"></div>
           </section>
+          <section class="record-panel missing-record-panel" aria-labelledby="missingRecordsTitle">
+            <div class="record-panel-heading"><h3 id="missingRecordsTitle">欠交明細</h3><span id="missingRecordsCount"></span></div>
+            <div id="missingRecords"></div>
+          </section>
         </div>
       </section>
     </main>
@@ -105,11 +109,11 @@
 
   <dialog id="missingDialog" class="modal">
     <form id="missingForm" class="modal-form">
-      <div class="modal-heading"><div><p class="eyebrow">首次收功課</p><h2>第一次記錄欠交</h2></div><button class="close-button" type="button" data-close aria-label="關閉">×</button></div>
+      <div class="modal-heading"><div><p class="eyebrow">首次收功課</p><h2 id="missingDialogTitle">第一次記錄欠交</h2></div><button class="close-button" type="button" data-close aria-label="關閉">×</button></div>
       <p id="missingAssignmentName" class="dialog-context"></p>
       <input id="missingAssignmentId" type="hidden">
       <label class="field" for="firstRecordDate">首次收交日期 <input id="firstRecordDate" type="date" required></label>
-      <p class="form-note">勾選當天欠交或缺席的學生；未勾選的學生會記為「已交」。欠交計 1 次，缺席不計。</p>
+      <p id="missingFormNote" class="form-note">勾選當天欠交或缺席的學生；未勾選的學生會記為「已交」。欠交計 1 次，缺席不計。</p>
       <p id="historicalRecordNote" class="form-note historical-record-note" hidden>這是補錄過往功課。勾選「今天仍未交」可同時新增今天的欠交記錄，每位再計 1 次；中間日期不會自動累計。</p>
       <label class="field" for="studentSearch">搜尋學生</label><input id="studentSearch" class="search-input" type="search" placeholder="輸入姓名搜尋">
       <div id="missingStudentList" class="checklist" role="group" aria-label="選擇學生"></div>

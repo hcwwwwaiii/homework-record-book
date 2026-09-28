@@ -382,6 +382,7 @@
   const studentMisses = (id) => state.dailyRecords.filter((item) => item.studentId === id && item.status === "missing");
   const assignmentMisses = (id) => state.dailyRecords.filter((item) => item.assignmentId === id && item.status === "missing");
   const assignmentEntries = (id) => state.dailyRecords.filter((item) => item.assignmentId === id);
+  const firstDayEntry = (assignment, studentId) => state.dailyRecords.find((item) => item.assignmentId === assignment.id && item.studentId === studentId && item.date === assignment.firstRecordedOn);
   function latestEntry(assignmentId, studentId, untilDate) {
     return assignmentEntries(assignmentId).filter((item) => item.studentId === studentId && (!untilDate || item.date <= untilDate)).sort((a, b) => a.date.localeCompare(b.date) || (a.recordedAt || "").localeCompare(b.recordedAt || "") || a.id.localeCompare(b.id)).at(-1);
   }
@@ -527,9 +528,10 @@
       const thumb = assignment.sampleType?.startsWith("image/") ? '<img data-sample-image="' + assignment.id + '" alt="' + esc(assignment.title) + ' 樣本預覽">' : assignment.sampleType === "application/pdf" ? '<iframe data-sample-pdf="' + assignment.id + '" title="' + esc(assignment.title) + ' PDF 第一頁預覽" tabindex="-1"></iframe>' : '<span><span class="file-icon" aria-hidden="true">▤</span><br><span class="file-label">未加入樣本</span></span>';
       const summary = !assignmentStudents(assignment).length ? "毋須管理" : assignment.firstRecordedOn ? (counts.missing + counts.absent ? (counts.missing + counts.absent) + " 份待交" : "全班已交") : "尚未記錄首次收交";
       const action = !assignmentStudents(assignment).length ? '<span class="no-management">這份功課沒有需要管理的學生</span>' : assignment.firstRecordedOn ? '<button class="small-button tracking-open-button" type="button" data-action="open-tracking" data-id="' + assignment.id + '">每日更新收交</button>' : '<button class="small-button tracking-open-button" type="button" data-action="add-missing" data-id="' + assignment.id + '">第一次記錄欠交</button>';
+      const editFirstAction = assignment.firstRecordedOn ? '<button class="small-button" type="button" data-action="edit-first-record" data-id="' + esc(assignment.id) + '">修改首次收交</button>' : "";
       const detailTopic = assignment.detailTopic ? '<p class="assignment-detail-topic"><strong>詳細課題／備註：</strong>' + esc(assignment.detailTopic) + '</p>' : "";
       const archiveButton = assignment.due < todayDate() ? '<button class="small-button archive-button" type="button" data-action="archive-assignment" data-id="' + assignment.id + '" aria-label="封存 ' + esc(assignment.title) + '">封存</button>' : "";
-      return '<article class="assignment-card"><button class="sample-thumb ' + (assignment.sampleType ? "has-file" : "") + '" type="button" data-action="' + (assignment.sampleType ? "preview" : "edit-assignment") + '" data-id="' + assignment.id + '" aria-label="' + (assignment.sampleType ? "查看" : "加入") + ' ' + esc(assignment.title) + ' 的功課樣本">' + thumb + '</button><div class="assignment-body"><div class="assignment-top"><div><p class="assignment-meta">繳交日期 · ' + formatDate(assignment.due) + (assignment.due < todayDate() ? " · 已過期" : "") + '</p><h3>' + esc(assignment.title) + '</h3>' + detailTopic + '</div><div class="assignment-actions"><button class="icon-button" type="button" data-action="edit-assignment" data-id="' + assignment.id + '" aria-label="編輯 ' + esc(assignment.title) + '">✎</button><button class="icon-button" type="button" data-action="delete-assignment" data-id="' + assignment.id + '" aria-label="刪除 ' + esc(assignment.title) + '">×</button></div></div><div class="assignment-status"><span class="status-pill ' + (counts.missing + counts.absent ? "" : "clear") + '">' + summary + '</span><span class="muted">累計 ' + misses.length + ' 次欠交 · 已交 ' + counts.submitted + ' 位 · 缺席 ' + counts.absent + ' 位</span></div><div class="missing-list">' + pendingList + '</div>' + absentList + submittedList + '<div class="assignment-footer">' + action + archiveButton + '</div></div></article>';
+      return '<article class="assignment-card"><button class="sample-thumb ' + (assignment.sampleType ? "has-file" : "") + '" type="button" data-action="' + (assignment.sampleType ? "preview" : "edit-assignment") + '" data-id="' + assignment.id + '" aria-label="' + (assignment.sampleType ? "查看" : "加入") + ' ' + esc(assignment.title) + ' 的功課樣本">' + thumb + '</button><div class="assignment-body"><div class="assignment-top"><div><p class="assignment-meta">繳交日期 · ' + formatDate(assignment.due) + (assignment.due < todayDate() ? " · 已過期" : "") + '</p><h3>' + esc(assignment.title) + '</h3>' + detailTopic + '</div><div class="assignment-actions"><button class="icon-button" type="button" data-action="edit-assignment" data-id="' + assignment.id + '" aria-label="編輯 ' + esc(assignment.title) + '">✎</button><button class="icon-button" type="button" data-action="delete-assignment" data-id="' + assignment.id + '" aria-label="刪除 ' + esc(assignment.title) + '">×</button></div></div><div class="assignment-status"><span class="status-pill ' + (counts.missing + counts.absent ? "" : "clear") + '">' + summary + '</span><span class="muted">累計 ' + misses.length + ' 次欠交 · 已交 ' + counts.submitted + ' 位 · 缺席 ' + counts.absent + ' 位</span></div><div class="missing-list">' + pendingList + '</div>' + absentList + submittedList + '<div class="assignment-footer">' + action + editFirstAction + archiveButton + '</div></div></article>';
     }).join("");
     groupCards(container, assignments, ".assignment-card");
     await Promise.all(assignments.filter((item) => item.sampleType).map(async (assignment) => {
@@ -609,6 +611,15 @@
     $("#recordsMonth").value = selectedRecordsMonth;
     const excellent = monthlyExcellentStudents(selectedRecordsMonth);
     $("#excellentRecords").innerHTML = excellent.length ? '<ul class="record-list">' + excellent.map((item) => '<li><strong>' + esc(item.student.name) + '</strong><span class="excellent-count">欠交 ' + item.missing + ' 次</span></li>').join("") + '</ul>' : '<p class="record-empty">這個月份暫時沒有符合條件的學生。</p>';
+    const missing = classMisses().slice().sort((a, b) => b.date.localeCompare(a.date) || (b.recordedAt || "").localeCompare(a.recordedAt || ""));
+    const studentsById = new Map(state.students.map((student) => [student.id, student]));
+    const assignmentsById = new Map(state.assignments.map((assignment) => [assignment.id, assignment]));
+    $("#missingRecordsCount").textContent = "共 " + missing.length + " 筆";
+    $("#missingRecords").innerHTML = missing.length ? '<ul class="record-list missing-record-list">' + missing.map((entry) => {
+      const student = studentsById.get(entry.studentId);
+      const assignment = assignmentsById.get(entry.assignmentId);
+      return '<li><span><strong>' + esc(student?.name || "已移除學生") + '</strong><small>' + esc(assignment?.title || "已移除功課") + '</small></span><time datetime="' + esc(entry.date) + '">記錄日期 ' + esc(entry.date) + '</time></li>';
+    }).join("") + '</ul>' : '<p class="record-empty">這個班別暫時沒有欠交記錄。</p>';
   }
 
   function render() {
@@ -761,18 +772,29 @@
     toast(`已加入 ${added} 位學生。`);
   }
 
-  function openMissingForm(assignmentId) {
+  function openMissingForm(assignmentId, editExisting = false) {
     const assignment = state.assignments.find((item) => item.id === assignmentId);
-    if (!assignment || assignment.archivedAt || assignment.firstRecordedOn) return;
+    if (!assignment || assignment.archivedAt || (editExisting ? !assignment.firstRecordedOn : Boolean(assignment.firstRecordedOn))) return;
     if (!classStudents().length) { activeView = "students"; render(); openStudentForm(); return; }
     if (!assignmentStudents(assignment).length) return toast("這份功課沒有需要管理的學生。", true);
     $("#missingAssignmentId").value = assignmentId;
     $("#missingAssignmentName").textContent = assignment.title;
-    $("#firstRecordDate").value = assignment.due < todayDate() ? assignment.due : todayDate();
-    $("#firstRecordDate").max = todayDate();
+    $("#missingDialogTitle").textContent = editExisting ? "修改首次收交記錄" : "第一次記錄欠交";
+    $("#missingFormNote").textContent = editExisting
+      ? "可修正首次收交當日的欠交或缺席；取消勾選會改為當日已交。欠交次數和警示會重新計算。"
+      : "勾選當天欠交或缺席的學生；未勾選的學生會記為「已交」。欠交計 1 次，缺席不計。";
+    $("#missingForm button[type=submit]").textContent = editExisting ? "儲存修改" : "儲存紀錄";
+    const dateField = $("#firstRecordDate");
+    dateField.value = editExisting ? assignment.firstRecordedOn : assignment.due < todayDate() ? assignment.due : todayDate();
+    dateField.max = todayDate();
+    dateField.disabled = editExisting;
     $("#studentSearch").value = "";
     selectedBatchStatuses = new Map();
     selectedTodayMissingIds = new Set();
+    if (editExisting) assignmentStudents(assignment).forEach((student) => {
+      const status = firstDayEntry(assignment, student.id)?.status;
+      if (status === "missing" || status === "absent") selectedBatchStatuses.set(student.id, status);
+    });
     renderMissingChoices();
     showDialog("missingDialog");
   }
@@ -780,13 +802,16 @@
   function renderMissingChoices() {
     const search = $("#studentSearch").value.trim().toLocaleLowerCase();
     const assignment = state.assignments.find((item) => item.id === $("#missingAssignmentId").value);
-    const historical = $("#firstRecordDate").value < todayDate();
+    const editing = Boolean(assignment?.firstRecordedOn);
+    const historical = !editing && $("#firstRecordDate").value < todayDate();
     $("#historicalRecordNote").hidden = !historical;
     const matching = sortedStudents().filter((item) => assignment && isManagedStudent(assignment, item) && (item.name.toLocaleLowerCase().includes(search) || String(item.number || "").includes(search)));
     $("#missingStudentList").innerHTML = matching.length ? matching.map((item) => {
       const selected = selectedBatchStatuses.get(item.id);
+      const firstDay = editing ? firstDayEntry(assignment, item.id) : null;
+      const label = selected === "missing" ? "當日欠交" : selected === "absent" ? "當日缺席" : editing && !firstDay ? "當日未記錄" : "當日已交";
       const todayMissing = selectedTodayMissingIds.has(item.id);
-      return '<div class="batch-student-row"><div class="batch-student-name"><strong>' + esc(item.name) + '</strong><small>' + (selected ? selected === "missing" ? "當日欠交" : "當日缺席" : "當日已交") + '</small></div><div class="batch-student-actions"><label class="batch-status-option"><input type="checkbox" data-student-id="' + esc(item.id) + '" value="missing" ' + (selected === "missing" ? "checked" : "") + '> 欠交</label><label class="batch-status-option"><input type="checkbox" data-student-id="' + esc(item.id) + '" value="absent" ' + (selected === "absent" ? "checked" : "") + '> 缺席</label>' + (historical ? '<label class="batch-status-option today-missing-option"><input type="checkbox" data-today-missing-student="' + esc(item.id) + '" ' + (todayMissing ? "checked" : "") + (selected ? "" : " disabled") + '> 今天仍未交</label>' : "") + '</div></div>';
+      return '<div class="batch-student-row"><div class="batch-student-name"><strong>' + esc(item.name) + '</strong><small>' + label + '</small></div><div class="batch-student-actions"><label class="batch-status-option"><input type="checkbox" data-student-id="' + esc(item.id) + '" value="missing" ' + (selected === "missing" ? "checked" : "") + '> 欠交</label><label class="batch-status-option"><input type="checkbox" data-student-id="' + esc(item.id) + '" value="absent" ' + (selected === "absent" ? "checked" : "") + '> 缺席</label>' + (historical ? '<label class="batch-status-option today-missing-option"><input type="checkbox" data-today-missing-student="' + esc(item.id) + '" ' + (todayMissing ? "checked" : "") + (selected ? "" : " disabled") + '> 今天仍未交</label>' : "") + '</div></div>';
     }).join("") : '<div class="check-empty">找不到符合的學生</div>';
     updateMissingSelection();
   }
@@ -796,9 +821,12 @@
     const missing = values.filter((value) => value === "missing").length;
     const absent = values.filter((value) => value === "absent").length;
     const assignment = state.assignments.find((item) => item.id === $("#missingAssignmentId").value);
-    const submitted = assignmentStudents(assignment).length - values.length;
-    const todayCount = $("#firstRecordDate").value < todayDate() ? ' · 今天仍未交 ' + selectedTodayMissingIds.size + ' 位' : '';
-    $("#missingSelectionCount").textContent = '當日已交 ' + submitted + ' 位 · 欠交 ' + missing + ' 位 · 缺席 ' + absent + ' 位' + todayCount;
+    const students = assignmentStudents(assignment);
+    const editing = Boolean(assignment.firstRecordedOn);
+    const unrecorded = editing ? students.filter((student) => !firstDayEntry(assignment, student.id) && !selectedBatchStatuses.has(student.id)).length : 0;
+    const submitted = students.length - values.length - unrecorded;
+    const todayCount = !editing && $("#firstRecordDate").value < todayDate() ? ' · 今天仍未交 ' + selectedTodayMissingIds.size + ' 位' : '';
+    $("#missingSelectionCount").textContent = '當日已交 ' + submitted + ' 位 · 欠交 ' + missing + ' 位 · 缺席 ' + absent + ' 位' + (unrecorded ? ' · 未記錄 ' + unrecorded + ' 位' : '') + todayCount;
     $("#missingForm button[type=submit]").disabled = false;
   }
 
@@ -806,19 +834,48 @@
     event.preventDefault();
     const assignment = state.assignments.find((item) => item.id === $("#missingAssignmentId").value);
     const date = $("#firstRecordDate").value;
-    if (!assignment || assignment.archivedAt || assignment.firstRecordedOn) return;
+    if (!assignment || assignment.archivedAt) return;
+    const editing = Boolean(assignment.firstRecordedOn);
+    if (editing && date !== assignment.firstRecordedOn) return toast("修改首次收交時不能更改日期。", true);
     if (!/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(date) || date > todayDate()) return toast("請選擇今天或之前的首次收交日期。", true);
     const students = assignmentStudents(assignment);
     if (!students.length) return;
+    const updates = students.map((student) => {
+      const original = editing ? firstDayEntry(assignment, student.id) : null;
+      const selected = selectedBatchStatuses.get(student.id);
+      if (editing && !original && !selected) return null;
+      return { student, original, status: selected || "submitted" };
+    }).filter(Boolean);
+    const changed = editing ? updates.filter((item) => item.original?.status !== item.status) : updates;
+    if (editing && !changed.length) {
+      closeDialog($("#missingDialog"));
+      return toast("首次收交記錄沒有變更。");
+    }
+    const correctedSubmitted = changed.filter((item) => item.status === "submitted" && item.original?.status !== "submitted");
+    const correctedIds = new Set(correctedSubmitted.map((item) => item.student.id));
+    const laterEntries = editing ? state.dailyRecords.filter((item) => item.assignmentId === assignment.id && correctedIds.has(item.studentId) && item.date > date) : [];
+    if (laterEntries.length && !confirm("有 " + correctedIds.size + " 位學生在首次收交日後仍有這份功課的記錄。改為當日已交會移除其較後日期的 " + laterEntries.length + " 筆記錄及相關欠交次數。確定儲存？")) return;
     const before = new Map(students.map((student) => [student.id, Math.floor(studentMisses(student.id).length / 5)]));
     const oldRecords = state.dailyRecords;
-    students.forEach((student) => upsertDailyRecord(assignment, student.id, date, selectedBatchStatuses.get(student.id) || "submitted"));
-    const todayMissingIds = date < todayDate() ? [...selectedTodayMissingIds].filter((id) => selectedBatchStatuses.has(id)) : [];
+    if (laterEntries.length) state.dailyRecords = state.dailyRecords.filter((item) => !(item.assignmentId === assignment.id && correctedIds.has(item.studentId) && item.date > date));
+    changed.forEach((item) => upsertDailyRecord(assignment, item.student.id, date, item.status));
+    const todayMissingIds = !editing && date < todayDate() ? [...selectedTodayMissingIds].filter((id) => selectedBatchStatuses.has(id)) : [];
     todayMissingIds.forEach((id) => upsertDailyRecord(assignment, id, todayDate(), "missing"));
-    assignment.firstRecordedOn = date;
-    if (!saveState()) { state.dailyRecords = oldRecords; assignment.firstRecordedOn = null; return; }
+    if (!editing) assignment.firstRecordedOn = date;
+    if (!saveState()) {
+      state.dailyRecords = oldRecords;
+      if (!editing) assignment.firstRecordedOn = null;
+      return;
+    }
     closeDialog($("#missingDialog"));
     render();
+    if (editing) {
+      const dayRecords = assignmentEntries(assignment.id).filter((item) => item.date === date);
+      const submitted = dayRecords.filter((item) => item.status === "submitted").length;
+      const missing = dayRecords.filter((item) => item.status === "missing").length;
+      const absent = dayRecords.filter((item) => item.status === "absent").length;
+      return toast("首次收交已修改：已交 " + submitted + " 位、欠交 " + missing + " 位、缺席 " + absent + " 位；警示已重新計算。" + (laterEntries.length ? " 已移除 " + laterEntries.length + " 筆較後日期記錄。" : ""));
+    }
     const missing = [...selectedBatchStatuses.values()].filter((value) => value === "missing").length;
     const absent = [...selectedBatchStatuses.values()].filter((value) => value === "absent").length;
     const newWarnings = students.filter((student) => Math.floor(studentMisses(student.id).length / 5) > before.get(student.id)).length;
@@ -1132,6 +1189,7 @@
       case "delete-student": deleteStudent(id); break;
       case "toggle-long-absent": toggleLongAbsent(id); break;
       case "add-missing": openMissingForm(id); break;
+      case "edit-first-record": openMissingForm(id, true); break;
       case "open-tracking": openTracking(id); break;
     }
   });
