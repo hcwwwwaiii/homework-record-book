@@ -67,6 +67,9 @@
   let selectedTodayMissingIds = new Set();
   let selectedDailyStatuses = new Map();
   let selectedRecordsMonth = todayDate().slice(0, 7);
+  let todayFilter = "unrecorded";
+  let todaySearch = "";
+  let displayedDate = "";
 
   function loadState() {
     let result;
@@ -206,7 +209,7 @@
       if (error) throw error;
       cloudTimestamp = saved.updated_at;
       localStorage.removeItem(CLOUD_DIRTY_KEY);
-      setCloudStatus("已同步 · " + new Date(saved.updated_at).toLocaleTimeString("zh-HK", { hour: "2-digit", minute: "2-digit" }));
+      setCloudStatus("已同步 · " + new Date(saved.updated_at).toLocaleString("zh-HK", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }));
     } catch (error) {
       console.error("Cloud sync failed", error);
       failed = true;
@@ -232,6 +235,7 @@
 
   async function startCloudSession(session) {
     if (!session?.user?.id) throw new Error("未能確認登入帳戶。");
+    $("#cloudAccount").textContent = "目前登入：" + (session.user.email || "帳戶 " + session.user.id.slice(0, 8));
     if (cloudReady && cloudUserId === session.user.id) return;
     cloudReady = false;
     cloudUserId = session.user.id;
@@ -290,12 +294,14 @@
     $("#cloudGate").hidden = false;
     $("#cloudLoginMessage").textContent = message || "";
     $("#cloudSignOutButton").hidden = true;
+    $("#cloudAccount").textContent = "尚未登入雲端帳戶";
   }
 
   async function initializeCloud() {
     if (location.protocol === "file:") {
       $("#appShell").hidden = false;
       setCloudStatus("本機版 · 紀錄只儲存在此瀏覽器");
+      $("#cloudAccount").textContent = "本機版 · 未連接雲端帳戶";
       render();
       return;
     }
@@ -510,19 +516,38 @@
 
   function renderToday() {
     const date = todayDate();
+    const query = todaySearch.trim().toLocaleLowerCase("zh-Hant");
+    const matches = (assignment, student, classItem) => !query || [
+      classItem.name, assignment.title, topicLabel(assignment), assignment.detailTopic || "",
+      student?.name || "", student?.form || "", student?.number || ""
+    ].some((value) => String(value).toLocaleLowerCase("zh-Hant").includes(query));
     const groups = state.classes.map((classItem) => {
       const assignments = state.assignments.filter((assignment) => assignment.classId === classItem.id && !assignment.archivedAt);
       const pending = assignments.map((assignment) => ({
         assignment,
         students: assignmentStudents(assignment).filter((student) => isOutstanding(assignment, student))
       })).filter((item) => item.students.length);
-      const unrecorded = assignments.filter((assignment) => !assignment.firstRecordedOn);
-      return { classItem, pending, unrecorded, count: pending.reduce((sum, item) => sum + item.students.length, 0) };
+      const toRecord = pending.reduce((sum, item) => sum + item.students.filter((student) => latestEntry(item.assignment.id, student.id)?.date !== date).length, 0);
+      const visible = pending.map(({ assignment, students }) => ({
+        assignment,
+        students: students.filter((student) => (todayFilter === "all" || latestEntry(assignment.id, student.id)?.date !== date) && matches(assignment, student, classItem))
+      })).filter((item) => item.students.length);
+      const unrecorded = assignments.filter((assignment) => !assignment.firstRecordedOn && matches(assignment, null, classItem));
+      return { classItem, visible, unrecorded, count: pending.reduce((sum, item) => sum + item.students.length, 0), toRecord };
     });
     const total = groups.reduce((sum, item) => sum + item.count, 0);
+    const toRecordTotal = groups.reduce((sum, item) => sum + item.toRecord, 0);
     $("#todayPendingCount").textContent = total + " 份待交";
-    $("#todayContent").innerHTML = groups.map(({ classItem, pending, unrecorded, count }) => {
-      const cards = pending.map(({ assignment, students }) => {
+    $("#todayToRecordCount").textContent = toRecordTotal + " 筆";
+    $("#todaySearch").value = todaySearch;
+    document.querySelectorAll("[data-today-filter]").forEach((button) => {
+      const active = button.dataset.todayFilter === todayFilter;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+    });
+    $("#todayContent").innerHTML = groups.map(({ classItem, visible, unrecorded, count, toRecord }) => {
+      const unrecordedList = unrecorded.length ? '<div class="today-unrecorded"><strong>' + unrecorded.length + ' 份功課尚未記錄首次收交</strong>' + unrecorded.map((assignment) => '<button class="small-button" type="button" data-action="add-missing" data-id="' + esc(assignment.id) + '">' + esc(assignment.title) + ' · 開始記錄</button>').join("") + '</div>' : "";
+      const cards = visible.map(({ assignment, students }) => {
         const rows = students.map((student) => {
           const latest = latestEntry(assignment.id, student.id);
           const todayRecord = latest?.date === date ? latest.status : "";
@@ -530,10 +555,11 @@
           const status = todayRecord === "missing" ? "今日已記欠交" : todayRecord === "absent" ? "今日已記缺席" : latest?.status === "absent" ? "上次缺席" : "仍待補交";
           return '<div class="today-row"><div class="today-person"><strong>' + esc(student.name) + '</strong><small>' + esc(studentDetail(student)) + '</small></div><div class="today-row-meta"><span class="tracking-status ' + (latest?.status === "absent" ? "absent" : "pending") + '">' + status + '</span><small>本份累計欠交 ' + assignmentCount + ' 次 · 上次記錄 ' + esc(latest?.date || "—") + '</small></div><div class="today-actions" role="group" aria-label="' + esc(student.name) + ' ' + esc(assignment.title) + ' 今日狀態"><button class="small-button" type="button" data-action="today-status" data-status="submitted" data-id="' + esc(assignment.id) + '" data-student-id="' + esc(student.id) + '">已補交</button><button class="small-button" type="button" data-action="today-status" data-status="absent" data-id="' + esc(assignment.id) + '" data-student-id="' + esc(student.id) + '" ' + (todayRecord === "absent" ? "disabled" : "") + '>缺席</button><button class="small-button today-missing-button" type="button" data-action="today-status" data-status="missing" data-id="' + esc(assignment.id) + '" data-student-id="' + esc(student.id) + '" ' + (todayRecord === "missing" ? "disabled" : "") + '>仍欠交</button></div></div>';
         }).join("");
-        return '<article class="today-card"><div class="today-card-heading"><div><p class="assignment-meta">' + esc(topicLabel(assignment)) + ' · 繳交日期 ' + esc(formatDate(assignment.due)) + '</p><h4>' + esc(assignment.title) + '</h4></div><span class="status-pill">' + students.length + ' 份待交</span></div>' + rows + '</article>';
+        const detail = assignment.detailTopic ? '<p class="today-assignment-detail">' + esc(assignment.detailTopic) + '</p>' : "";
+        return '<article class="today-card"><div class="today-card-heading"><div><p class="assignment-meta">' + esc(topicLabel(assignment)) + ' · 繳交日期 ' + esc(formatDate(assignment.due)) + '</p><h4>' + esc(assignment.title) + '</h4>' + detail + '</div><span class="status-pill">' + students.length + ' 份待交</span></div>' + rows + '</article>';
       }).join("");
-      const unrecordedList = unrecorded.length ? '<div class="today-unrecorded"><strong>' + unrecorded.length + ' 份功課尚未記錄首次收交</strong>' + unrecorded.map((assignment) => '<button class="small-button" type="button" data-action="add-missing" data-id="' + esc(assignment.id) + '">' + esc(assignment.title) + ' · 開始記錄</button>').join("") + '</div>' : "";
-      return '<section class="today-class" aria-label="' + esc(classItem.name) + '"><div class="today-class-heading"><h3>' + esc(classItem.name) + '</h3><span>' + count + ' 份待交</span></div>' + (cards || '<p class="record-empty">目前沒有待交功課。</p>') + unrecordedList + '</section>';
+      const empty = todayFilter === "unrecorded" ? (count ? "今天已記錄的學生可在「全部待交」查看或修正。" : "目前沒有待交功課。") : (query ? "沒有符合搜尋的待交功課。" : "目前沒有待交功課。");
+      return '<section class="today-class" aria-label="' + esc(classItem.name) + '"><div class="today-class-heading"><h3>' + esc(classItem.name) + '</h3><span>' + (todayFilter === "unrecorded" ? toRecord + " 筆未記今天" : count + " 份待交") + '</span></div>' + unrecordedList + (cards || (!unrecordedList ? '<p class="record-empty">' + empty + '</p>' : "")) + '</section>';
     }).join("");
   }
 
@@ -1265,6 +1291,8 @@
     if (close) return closeDialog(close.closest("dialog"));
     const classTab = event.target.closest("[data-class]");
     if (classTab) { activeClassId = classTab.dataset.class; render(); return; }
+    const filter = event.target.closest("[data-today-filter]");
+    if (filter) { todayFilter = filter.dataset.todayFilter; renderToday(); return; }
     const nav = event.target.closest("[data-view]");
     if (nav) { activeView = nav.dataset.view; render(); return; }
     const button = event.target.closest("[data-action]");
@@ -1311,6 +1339,7 @@
   $("#missingForm").addEventListener("submit", saveMissing);
   $("#settingsForm").addEventListener("submit", saveSettings);
   $("#studentSearch").addEventListener("input", renderMissingChoices);
+  $("#todaySearch").addEventListener("input", (event) => { todaySearch = event.target.value; renderToday(); });
   $("#firstRecordDate").addEventListener("change", () => { if ($("#firstRecordDate").value >= todayDate()) selectedTodayMissingIds.clear(); renderMissingChoices(); });
   $("#trackingSearch").addEventListener("input", renderTracking);
   $("#trackingDate").addEventListener("change", () => {
@@ -1383,7 +1412,18 @@
   window.addEventListener("online", () => {
     if (cloudReady && (cloudPending || localStorage.getItem(CLOUD_DIRTY_KEY) === "1")) queueCloudSave();
   });
-  $("#todayLabel").textContent = new Intl.DateTimeFormat("zh-HK", { year: "numeric", month: "long", day: "numeric", weekday: "long" }).format(new Date());
+  function refreshDay() {
+    const current = todayDate();
+    if (displayedDate === current) return;
+    if (displayedDate && selectedRecordsMonth === displayedDate.slice(0, 7)) selectedRecordsMonth = current.slice(0, 7);
+    displayedDate = current;
+    $("#todayLabel").textContent = new Intl.DateTimeFormat("zh-HK", { year: "numeric", month: "long", day: "numeric", weekday: "long" }).format(new Date());
+    if (!$("#appShell").hidden) render();
+  }
+  window.addEventListener("focus", refreshDay);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshDay(); });
+  setInterval(refreshDay, 60000);
+  refreshDay();
   initializeCloud();
 })();
 

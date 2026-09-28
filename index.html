@@ -7,9 +7,9 @@
   <meta name="description" content="記錄各班所有功課的收交情況、每日狀態與欠交警示。">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23183b3b'/%3E%3Cpath d='M19 16h21l7 7v25H19z' fill='none' stroke='%23f4e9cc' stroke-width='4'/%3E%3Cpath d='M27 33h13M27 41h9' stroke='%23f4e9cc' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
   <title>功課記錄簿</title>
-  <link rel="stylesheet" href="styles.css?v=48e7c28e">
+  <link rel="stylesheet" href="styles.css?v=9151c7af">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-  <script src="app.js?v=24457715" defer></script>
+  <script src="app.js?v=0873ba43" defer></script>
 </head>
 <body>
   <div class="app-shell" id="appShell" hidden>
@@ -23,7 +23,7 @@
         <button class="nav-link" data-view="records" type="button"><span aria-hidden="true">◎</span> 欠交記錄</button>
       </nav>
       <div class="sidebar-bottom">
-        <button class="text-button sidebar-settings" id="classSettingsButton" type="button">⚙ <span>班別設定</span></button>
+        <button class="text-button sidebar-settings" id="classSettingsButton" type="button">⚙ <span>班別與資料</span></button>
         <p id="syncStatus">正在連接雲端同步…</p>
       </div>
     </aside>
@@ -31,7 +31,7 @@
     <main class="main-content">
       <header class="topbar">
         <div><p class="eyebrow">課堂管理</p><h1>功課記錄簿</h1></div>
-        <div class="topbar-right"><span id="todayLabel" class="today-label"></span><button id="mobileSettingsButton" class="icon-button mobile-settings" type="button" aria-label="班別設定">⚙</button></div>
+        <div class="topbar-right"><span id="todayLabel" class="today-label"></span><button id="mobileSettingsButton" class="icon-button mobile-settings" type="button" aria-label="班別與資料">⚙</button></div>
       </header>
 
       <section class="class-section" aria-label="選擇班別">
@@ -49,7 +49,9 @@
 
       <section id="todayView" class="workspace" aria-labelledby="todayTitle" hidden>
         <div class="section-heading"><div><p class="eyebrow">三班集中處理</p><h2 id="todayTitle">今日追收總覽</h2></div><span id="todayPendingCount" class="today-total"></span></div>
-        <p class="today-intro">只顯示現行功課中仍待交的學生。每次操作只更新該學生的這份功課；同一天重按會修正當天狀態，不會重複計欠交。</p>
+        <div class="today-guide"><div><strong>建議操作次序</strong><p>新增功課 → 記錄首次收交 → 每日追收 → 查看欠交與警示</p></div><button class="small-button" type="button" data-view="assignments">前往功課紀錄</button></div>
+        <p class="today-intro">只列出現行功課中仍待交的學生。先處理「尚未記錄首次收交」，再更新今日狀態；同一天修改紀錄不會重複計欠交。</p>
+        <div class="today-toolbar"><div class="today-filters" role="group" aria-label="追收名單篩選"><button class="today-filter active" type="button" data-today-filter="unrecorded" aria-pressed="true">未記今天 <span id="todayToRecordCount"></span></button><button class="today-filter" type="button" data-today-filter="all" aria-pressed="false">全部待交</button></div><label class="today-search">搜尋學生或功課<input id="todaySearch" type="search" placeholder="姓名、課題或功課名稱"></label></div>
         <div id="todayContent" class="today-content"></div>
       </section>
 
@@ -138,11 +140,10 @@
 
   <dialog id="settingsDialog" class="modal">
     <form id="settingsForm" class="modal-form">
-      <div class="modal-heading"><div><p class="eyebrow">班別設定</p><h2>編輯班別名稱</h2></div><button class="close-button" type="button" data-close aria-label="關閉">×</button></div>
-      <p class="dialog-context">三個班別的科目已分為兩班數學、一班物理。</p>
-      <div id="classNameFields"></div>
-      <div class="backup-tools"><strong>雲端同步</strong><p id="cloudSyncStatus" class="form-note">登入後同步班別、學生、功課及收交紀錄。</p><button id="cloudSignOutButton" class="secondary-button" type="button" hidden>登出雲端同步</button></div>
-      <div class="backup-tools"><strong>資料備份與轉移</strong><p class="form-note">匯出檔案包含學生姓名、功課記錄和已上載樣本。請私下保存；在 GitHub 網站開啟「班別設定」後，可匯入此檔案。</p><div class="backup-actions"><button id="exportBackupButton" class="secondary-button" type="button">匯出完整備份</button><button id="importBackupButton" class="secondary-button" type="button">匯入備份</button><input id="importBackupFile" type="file" accept="application/json,.json" hidden></div></div>
+      <div class="modal-heading"><div><p class="eyebrow">網站設定</p><h2>班別與資料</h2></div><button class="close-button" type="button" data-close aria-label="關閉">×</button></div>
+      <section class="settings-section" aria-labelledby="settingsClassesTitle"><h3 id="settingsClassesTitle">班別名稱</h3><p class="dialog-context">三個班別分為兩班數學、一班物理。</p><div id="classNameFields"></div></section>
+      <section class="settings-section" aria-labelledby="settingsCloudTitle"><h3 id="settingsCloudTitle">雲端同步</h3><p id="cloudAccount" class="cloud-account">正在確認登入帳戶…</p><p id="cloudSyncStatus" class="form-note">登入後同步班別、學生、功課及收交紀錄。</p><button id="cloudSignOutButton" class="secondary-button" type="button" hidden>登出此帳戶</button></section>
+      <section class="settings-section" aria-labelledby="settingsBackupTitle"><h3 id="settingsBackupTitle">資料備份與轉移</h3><p class="form-note">備份包含學生姓名、功課紀錄及樣本，請私下保存。匯入會取代現有紀錄；建議先匯出一份備份。</p><div class="backup-actions"><button id="exportBackupButton" class="secondary-button" type="button">匯出完整備份</button><button id="importBackupButton" class="secondary-button" type="button">匯入備份</button><input id="importBackupFile" type="file" accept="application/json,.json" hidden></div></section>
       <div class="modal-actions"><button class="secondary-button" type="button" data-close>取消</button><button class="primary-button" type="submit">儲存名稱</button></div>
     </form>
   </dialog>
