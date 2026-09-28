@@ -286,7 +286,7 @@
       })
       .subscribe();
     render();
-    if (!cloudPending) setCloudStatus("已同步 · " + new Date().toLocaleTimeString("zh-HK", { hour: "2-digit", minute: "2-digit" }));
+    if (!cloudPending) setCloudStatus("已同步 · " + new Date(cloudTimestamp || Date.now()).toLocaleString("zh-HK", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }));
   }
 
   function showCloudGate(message) {
@@ -558,8 +558,10 @@
         const detail = assignment.detailTopic ? '<p class="today-assignment-detail">' + esc(assignment.detailTopic) + '</p>' : "";
         return '<article class="today-card"><div class="today-card-heading"><div><p class="assignment-meta">' + esc(topicLabel(assignment)) + ' · 繳交日期 ' + esc(formatDate(assignment.due)) + '</p><h4>' + esc(assignment.title) + '</h4>' + detail + '</div><span class="status-pill">' + students.length + ' 份待交</span></div>' + rows + '</article>';
       }).join("");
-      const empty = todayFilter === "unrecorded" ? (count ? "今天已記錄的學生可在「全部待交」查看或修正。" : "目前沒有待交功課。") : (query ? "沒有符合搜尋的待交功課。" : "目前沒有待交功課。");
-      return '<section class="today-class" aria-label="' + esc(classItem.name) + '"><div class="today-class-heading"><h3>' + esc(classItem.name) + '</h3><span>' + (todayFilter === "unrecorded" ? toRecord + " 筆未記今天" : count + " 份待交") + '</span></div>' + unrecordedList + (cards || (!unrecordedList ? '<p class="record-empty">' + empty + '</p>' : "")) + '</section>';
+      const empty = query ? "沒有符合搜尋的待交功課。" : todayFilter === "unrecorded" ? (count ? "今天已記錄的學生可在「全部待交」查看或修正。" : "目前沒有待交功課。") : "目前沒有待交功課。";
+      const visibleCount = visible.reduce((sum, item) => sum + item.students.length, 0);
+      const headingCount = query ? visibleCount + " 位符合搜尋" : todayFilter === "unrecorded" ? toRecord + " 筆未記今天" : count + " 份待交";
+      return '<section class="today-class" aria-label="' + esc(classItem.name) + '"><div class="today-class-heading"><h3>' + esc(classItem.name) + '</h3><span>' + headingCount + '</span></div>' + unrecordedList + (cards || (!unrecordedList ? '<p class="record-empty">' + empty + '</p>' : "")) + '</section>';
     }).join("");
   }
 
