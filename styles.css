@@ -213,6 +213,9 @@
 .settings-section .dialog-context{margin:0 0 11px}
 .settings-section .form-note{margin:5px 0 11px}
 .cloud-account{display:inline-block;max-width:100%;overflow-wrap:anywhere;background:#edf4ef;border:1px solid #d7e7dc;border-radius:8px;padding:8px 10px;margin:2px 0 5px;color:#285743;font-size:12px;font-weight:750}
+.cloud-conflict-actions{margin:10px 0 14px;padding:13px;border:1px solid #e8c9a6;border-radius:10px;background:#fff7ed}
+.cloud-conflict-actions p{margin:0 0 10px;color:#765139;font-size:12px;line-height:1.6}
+.cloud-conflict-actions button{margin:0 7px 7px 0}
 @media(max-width:680px){.today-guide{align-items:flex-start;flex-direction:column}.today-toolbar{align-items:stretch;flex-direction:column}.today-filters{align-self:flex-start}.today-search{min-width:0;width:100%}}
 /* Student-first records layout */
 #recordsView .records-grid{grid-template-columns:minmax(0,1fr);gap:16px}

@@ -7,9 +7,10 @@
   <meta name="description" content="記錄各班所有功課的收交情況、每日狀態與欠交警示。">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23183b3b'/%3E%3Cpath d='M19 16h21l7 7v25H19z' fill='none' stroke='%23f4e9cc' stroke-width='4'/%3E%3Cpath d='M27 33h13M27 41h9' stroke='%23f4e9cc' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
   <title>功課記錄簿</title>
-  <link rel="stylesheet" href="styles.css?v=d3df5025">
+  <link rel="stylesheet" href="styles.css?v=6c6288e0">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-  <script src="app.js?v=a1192b78" defer></script>
+  <script src="cloud-model.js?v=cbfd0c8f" defer></script>
+  <script src="app.js?v=6f42d73d" defer></script>
 </head>
 <body>
   <div class="app-shell" id="appShell" hidden>
@@ -143,7 +144,7 @@
     <form id="settingsForm" class="modal-form">
       <div class="modal-heading"><div><p class="eyebrow">網站設定</p><h2>班別與資料</h2></div><button class="close-button" type="button" data-close aria-label="關閉">×</button></div>
       <section class="settings-section" aria-labelledby="settingsClassesTitle"><h3 id="settingsClassesTitle">班別名稱</h3><p class="dialog-context">三個班別分為兩班數學、一班物理。</p><div id="classNameFields"></div></section>
-      <section class="settings-section" aria-labelledby="settingsCloudTitle"><h3 id="settingsCloudTitle">雲端同步</h3><p id="cloudAccount" class="cloud-account">正在確認登入帳戶…</p><p id="cloudSyncStatus" class="form-note">登入後同步班別、學生、功課及收交紀錄。</p><button id="cloudSignOutButton" class="secondary-button" type="button" hidden>登出此帳戶</button></section>
+      <section class="settings-section" aria-labelledby="settingsCloudTitle"><h3 id="settingsCloudTitle">雲端同步</h3><p id="cloudAccount" class="cloud-account">正在確認登入帳戶…</p><p id="cloudSyncStatus" class="form-note">登入後同步班別、學生、功課及收交紀錄。</p><div id="cloudConflictActions" class="cloud-conflict-actions" hidden><p>其他裝置亦修改了相同紀錄。請先匯出備份，再選擇保留此裝置或雲端的版本。</p><button id="keepLocalChangesButton" class="secondary-button" type="button">保留此裝置修改</button><button id="useCloudChangesButton" class="secondary-button" type="button">採用雲端紀錄</button></div><button id="cloudSignOutButton" class="secondary-button" type="button" hidden>登出此帳戶</button></section>
       <section class="settings-section" aria-labelledby="settingsBackupTitle"><h3 id="settingsBackupTitle">資料備份與轉移</h3><p class="form-note">備份包含學生姓名、功課紀錄及樣本，請私下保存。匯入會取代現有紀錄；建議先匯出一份備份。</p><div class="backup-actions"><button id="exportBackupButton" class="secondary-button" type="button">匯出完整備份</button><button id="importBackupButton" class="secondary-button" type="button">匯入備份</button><input id="importBackupFile" type="file" accept="application/json,.json" hidden></div></section>
       <div class="modal-actions"><button class="secondary-button" type="button" data-close>取消</button><button class="primary-button" type="submit">儲存名稱</button></div>
     </form>
@@ -157,7 +158,7 @@
   <div id="cloudGate" class="cloud-gate" hidden>
     <form id="cloudLoginForm" class="cloud-login">
       <p class="eyebrow">雲端同步</p><h1>登入功課記錄簿</h1>
-      <p>使用已建立的教師帳戶登入，跨裝置共用同一份班別及功課紀錄。</p>
+      <p>使用教師帳戶登入，在各裝置查看及更新同一份班別與功課紀錄。</p>
       <label class="field">電郵地址<input id="cloudEmail" type="email" autocomplete="username" required></label>
       <label class="field">密碼<input id="cloudPassword" type="password" autocomplete="current-password" required></label>
       <button id="cloudLoginButton" class="primary-button" type="submit">登入並同步</button>

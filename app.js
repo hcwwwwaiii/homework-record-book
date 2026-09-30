@@ -4,10 +4,12 @@
   const STORAGE_KEY = "homework-followup-v1";
   const CLOUD_URL = "https://omemhiwbmuzzfsrawlpg.supabase.co";
   const CLOUD_KEY = "sb_publishable_p_u_0rNMe1BgH5o_QQUUyg_6ksNm1xg";
-  const CLOUD_TABLE = "homework_sync_state";
+  const CLOUD_TABLE = "homework_workspaces";
   const CLOUD_BUCKET = "homework-samples";
   const CLOUD_USER_KEY = STORAGE_KEY + "-cloud-user";
   const CLOUD_DIRTY_KEY = STORAGE_KEY + "-cloud-dirty";
+  const CLOUD_BASE_KEY = STORAGE_KEY + "-cloud-base-";
+  const CLOUD_PENDING_SAMPLES_KEY = STORAGE_KEY + "-pending-samples-";
   const DEFAULT_CLASSES = [
     { id: "math-a", name: "數學 A 班", subject: "數學" },
     { id: "math-b", name: "數學 B 班", subject: "數學" },
@@ -48,6 +50,7 @@
   };
   const HOMEWORK_NAMES = ["預習", "課堂練習", "鞏固練習", "TSA練習"];
   const $ = (selector) => document.querySelector(selector);
+  const cloudModel = window.HomeworkCloudModel;
   let cloudClient = null;
   let cloudReady = false;
   let cloudBusy = false;
@@ -56,6 +59,10 @@
   let cloudTimestamp = null;
   let cloudChannel = null;
   let cloudUserId = null;
+  let cloudRevision = null;
+  let cloudBaseline = null;
+  let cloudConflict = false;
+  let cloudUploadingSamples = false;
   const state = loadState();
   let activeClassId = DEFAULT_CLASSES[0].id;
   let activeView = "today";
@@ -159,28 +166,83 @@
       Array.isArray(data.assignments) && Array.isArray(data.misses);
   }
 
-  function mergeCloudState(remote, local) {
-    const merged = { ...remote, ...local };
-    const collections = ["classes", "students", "assignments", "misses", "absences", "dailyRecords", "excellentByMonth", "warningsHandled"];
-    for (const key of collections) {
-      const byId = new Map();
-      for (const item of [...(remote[key] || []), ...(local[key] || [])]) {
-        if (item && item.id != null) byId.set(String(item.id), { ...(byId.get(String(item.id)) || {}), ...item });
-      }
-      merged[key] = Array.from(byId.values());
-    }
-    return merged;
-  }
-
   function applyCloudState(data) {
     if (!validCloudState(data)) throw new Error("雲端資料格式不正確。");
+    for (const assignment of data.assignments) {
+      const previous = state.assignments.find((item) => item.id === assignment.id);
+      if (previous && previous.sampleUpdatedAt !== assignment.sampleUpdatedAt &&
+          !pendingSampleIds().includes(assignment.id)) {
+        sampleOperation("readwrite", assignment.id).catch((error) => console.warn("Unable to refresh sample cache", error));
+      }
+    }
     Object.keys(state).forEach((key) => delete state[key]);
     Object.assign(state, data);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }
 
+  function rememberCloudBase(data, revision, updatedAt) {
+    cloudBaseline = cloudModel.clone(data);
+    cloudRevision = Number(revision);
+    cloudTimestamp = updatedAt;
+    try {
+      localStorage.setItem(CLOUD_BASE_KEY + cloudUserId, JSON.stringify({ revision: cloudRevision, data: cloudBaseline }));
+    } catch (error) {
+      console.warn("Unable to store cloud comparison copy", error);
+    }
+  }
+
+  function showConflictActions() {
+    const actions = $("#cloudConflictActions");
+    if (actions) actions.hidden = !cloudConflict;
+  }
+
+  async function readCloudState() {
+    const { data, error } = await cloudClient.rpc("homework_load");
+    if (error) throw error;
+    if (!data || !validCloudState(data.state) || !Number.isSafeInteger(Number(data.revision))) {
+      throw new Error("雲端資料格式不正確。");
+    }
+    return { state: data.state, revision: Number(data.revision), updatedAt: data.updatedAt };
+  }
+
+  function pendingSampleIds() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(CLOUD_PENDING_SAMPLES_KEY + cloudUserId));
+      return Array.isArray(saved) ? saved : [];
+    } catch { return []; }
+  }
+
+  function markSamplePending(id) {
+    if (!cloudUserId) return;
+    const ids = new Set(pendingSampleIds());
+    ids.add(id);
+    localStorage.setItem(CLOUD_PENDING_SAMPLES_KEY + cloudUserId, JSON.stringify([...ids]));
+  }
+
+  async function uploadPendingSamples() {
+    if (!cloudReady || cloudUploadingSamples || !cloudClient) return;
+    cloudUploadingSamples = true;
+    try {
+      for (const id of pendingSampleIds()) {
+        if (!state.assignments.some((item) => item.id === id)) continue;
+        const file = await sampleOperation("readonly", id);
+        if (!file) continue;
+        const { error } = await cloudClient.storage.from(CLOUD_BUCKET)
+          .upload(id, file, { upsert: true, contentType: file.type });
+        if (error) throw error;
+        localStorage.setItem(CLOUD_PENDING_SAMPLES_KEY + cloudUserId,
+          JSON.stringify(pendingSampleIds().filter((item) => item !== id)));
+      }
+    } catch (error) {
+      console.error("Sample upload failed", error);
+      setCloudStatus("功課資料已同步；樣本檔案待網絡恢復後重試。");
+    } finally {
+      cloudUploadingSamples = false;
+    }
+  }
+
   function queueCloudSave() {
-    if (!cloudReady || !cloudClient) return;
+    if (!cloudReady || !cloudClient || cloudConflict) return;
     cloudPending = true;
     setCloudStatus("有待同步的變更…");
     clearTimeout(cloudTimer);
@@ -188,48 +250,96 @@
   }
 
   async function syncCloudNow() {
-    if (!cloudReady || !cloudClient) return;
-    if (cloudBusy) { cloudPending = true; return; }
+    if (!cloudReady || !cloudClient || cloudConflict) return false;
+    if (cloudBusy) { cloudPending = true; return false; }
     cloudBusy = true;
     cloudPending = false;
     let failed = false;
     try {
-      const { data: latest, error: readError } = await cloudClient
-        .from(CLOUD_TABLE).select("data,updated_at").eq("id", "main").maybeSingle();
-      if (readError) throw readError;
-      if (latest && cloudTimestamp && latest.updated_at !== cloudTimestamp) {
-        applyCloudState(mergeCloudState(latest.data, state));
-        cloudTimestamp = latest.updated_at;
-        render();
-      }
       const payload = JSON.parse(JSON.stringify(state));
-      const { data: saved, error } = await cloudClient.from(CLOUD_TABLE)
-        .upsert({ id: "main", data: payload, updated_at: new Date().toISOString() }, { onConflict: "id" })
-        .select("updated_at").single();
-      if (error) throw error;
-      cloudTimestamp = saved.updated_at;
-      localStorage.removeItem(CLOUD_DIRTY_KEY);
-      setCloudStatus("已同步 · " + new Date(saved.updated_at).toLocaleString("zh-HK", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }));
+      const patch = cloudModel.diff(cloudBaseline, payload);
+      if (patch) {
+        const { data: saved, error } = await cloudClient.rpc("homework_apply_patch", {
+          p_expected_revision: cloudRevision, p_patch: patch
+        });
+        if (error?.message?.includes("revision_conflict")) {
+          const remote = await readCloudState();
+          const clashes = cloudModel.conflicts(cloudBaseline, remote.state, patch);
+          if (clashes.length) {
+            cloudConflict = true;
+            showConflictActions();
+            setCloudStatus("其他裝置亦修改了相同紀錄；請在「班別與資料」選擇保留版本。");
+            return false;
+          }
+          applyCloudState(cloudModel.apply(remote.state, patch));
+          rememberCloudBase(remote.state, remote.revision, remote.updatedAt);
+          cloudPending = true;
+          render();
+          return false;
+        }
+        if (error) throw error;
+        rememberCloudBase(payload, saved.revision, saved.updatedAt);
+      }
+      if (cloudModel.diff(cloudBaseline, state)) {
+        localStorage.setItem(CLOUD_DIRTY_KEY, "1");
+        cloudPending = true;
+      } else {
+        localStorage.removeItem(CLOUD_DIRTY_KEY);
+      }
+      setCloudStatus("已同步 · " + new Date(cloudTimestamp || Date.now()).toLocaleString("zh-HK", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }));
+      await uploadPendingSamples();
+      return true;
     } catch (error) {
       console.error("Cloud sync failed", error);
       failed = true;
       cloudPending = true;
       localStorage.setItem(CLOUD_DIRTY_KEY, "1");
       setCloudStatus("同步暫時失敗；紀錄仍保存在本機，恢復連線後會重試。");
+      return false;
     } finally {
       cloudBusy = false;
-      if (!failed && cloudPending && cloudReady && navigator.onLine) queueCloudSave();
+      if (!failed && cloudPending && cloudReady && !cloudConflict && navigator.onLine) queueCloudSave();
     }
   }
 
-  async function uploadLocalSamples() {
-    for (const assignment of state.assignments) {
-      if (!assignment.sampleType) continue;
-      const file = await sampleOperation("readonly", assignment.id).catch(() => null);
-      if (!file) continue;
-      const { error } = await cloudClient.storage.from(CLOUD_BUCKET)
-        .upload(assignment.id, file, { upsert: true, contentType: file.type });
-      if (error) console.warn("Unable to sync homework sample", assignment.id, error);
+  async function refreshFromCloud() {
+    if (!cloudReady || cloudBusy || cloudConflict) return;
+    if (localStorage.getItem(CLOUD_DIRTY_KEY) === "1") return queueCloudSave();
+    try {
+      const remote = await readCloudState();
+      if (remote.revision <= cloudRevision) return;
+      if (localStorage.getItem(CLOUD_DIRTY_KEY) === "1") return queueCloudSave();
+      applyCloudState(remote.state);
+      rememberCloudBase(remote.state, remote.revision, remote.updatedAt);
+      render();
+      setCloudStatus("已接收其他裝置的更新。");
+    } catch (error) {
+      console.error("Unable to refresh cloud records", error);
+      setCloudStatus("未能讀取其他裝置的更新；請稍後重試。");
+    }
+  }
+
+  async function resolveCloudConflict(useLocal) {
+    if (!cloudConflict || !cloudReady) return;
+    try {
+      const remote = await readCloudState();
+      const patch = cloudModel.diff(cloudBaseline, state);
+      if (useLocal && patch) {
+        applyCloudState(cloudModel.apply(remote.state, patch));
+        localStorage.setItem(CLOUD_DIRTY_KEY, "1");
+      } else {
+        applyCloudState(remote.state);
+        localStorage.removeItem(CLOUD_DIRTY_KEY);
+      }
+      rememberCloudBase(remote.state, remote.revision, remote.updatedAt);
+      cloudConflict = false;
+      showConflictActions();
+      render();
+      if (useLocal && patch) queueCloudSave();
+      else setCloudStatus("已載入最新雲端紀錄。");
+    } catch (error) {
+      console.error("Unable to resolve cloud conflict", error);
+      setCloudStatus("未能取得最新雲端紀錄，請稍後重試。");
     }
   }
 
@@ -240,53 +350,62 @@
     cloudReady = false;
     cloudUserId = session.user.id;
     setCloudStatus("正在載入雲端紀錄…");
-    const { data: remote, error } = await cloudClient.from(CLOUD_TABLE)
-      .select("data,updated_at").eq("id", "main").maybeSingle();
-    if (error) throw error;
+    const remote = await readCloudState();
     const hasLocalChanges = localStorage.getItem(CLOUD_DIRTY_KEY) === "1";
     const hasSyncedHere = localStorage.getItem(CLOUD_USER_KEY) === session.user.id;
-    if (remote) {
-      if (!validCloudState(remote.data)) throw new Error("雲端記錄格式不正確。");
-      if (!hasSyncedHere || hasLocalChanges) {
-        applyCloudState(mergeCloudState(remote.data, state));
-        cloudTimestamp = remote.updated_at;
-        cloudReady = true;
-        await syncCloudNow();
+    if (hasLocalChanges && hasSyncedHere) {
+      let oldBase;
+      try { oldBase = JSON.parse(localStorage.getItem(CLOUD_BASE_KEY + cloudUserId)); }
+      catch { oldBase = null; }
+      if (oldBase && validCloudState(oldBase.data)) {
+        const patch = cloudModel.diff(oldBase.data, state);
+        const clashes = patch ? cloudModel.conflicts(oldBase.data, remote.state, patch) : [];
+        if (clashes.length) {
+          cloudBaseline = oldBase.data;
+          cloudRevision = Number(oldBase.revision);
+          cloudConflict = true;
+        } else {
+          applyCloudState(patch ? cloudModel.apply(remote.state, patch) : remote.state);
+          rememberCloudBase(remote.state, remote.revision, remote.updatedAt);
+          if (!patch) localStorage.removeItem(CLOUD_DIRTY_KEY);
+        }
       } else {
-        applyCloudState(remote.data);
-        cloudTimestamp = remote.updated_at;
-        cloudReady = true;
+        if (cloudModel.diff(remote.state, state)) {
+          cloudBaseline = remote.state;
+          cloudRevision = remote.revision;
+          cloudConflict = true;
+        } else {
+          applyCloudState(remote.state);
+          rememberCloudBase(remote.state, remote.revision, remote.updatedAt);
+          localStorage.removeItem(CLOUD_DIRTY_KEY);
+        }
       }
     } else {
-      cloudReady = true;
-      cloudTimestamp = null;
-      localStorage.setItem(CLOUD_DIRTY_KEY, "1");
-      await syncCloudNow();
+      applyCloudState(remote.state);
+      rememberCloudBase(remote.state, remote.revision, remote.updatedAt);
+      localStorage.removeItem(CLOUD_DIRTY_KEY);
     }
-    await uploadLocalSamples();
+    cloudReady = true;
     localStorage.setItem(CLOUD_USER_KEY, session.user.id);
     $("#cloudGate").hidden = true;
     $("#appShell").hidden = false;
     $("#cloudSignOutButton").hidden = false;
+    showConflictActions();
     if (cloudChannel) cloudClient.removeChannel(cloudChannel);
-    cloudChannel = cloudClient.channel("homework-shared-state")
-      .on("postgres_changes", { event: "*", schema: "public", table: CLOUD_TABLE, filter: "id=eq.main" }, (change) => {
-        const row = change.new;
-        if (!row?.data || row.updated_at === cloudTimestamp || cloudPending) return;
-        try {
-          applyCloudState(row.data);
-          cloudTimestamp = row.updated_at;
-          localStorage.removeItem(CLOUD_DIRTY_KEY);
-          render();
-          setCloudStatus("已接收其他裝置的更新。");
-        } catch (error) {
-          console.error("Unable to apply cloud update", error);
-          setCloudStatus("收到雲端更新，但資料格式無法讀取。");
-        }
+    cloudChannel = cloudClient.channel("homework-workspace-" + cloudUserId)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: CLOUD_TABLE, filter: "owner_id=eq." + cloudUserId }, (change) => {
+        if (change.new?.revision > cloudRevision) refreshFromCloud();
       })
       .subscribe();
     render();
-    if (!cloudPending) setCloudStatus("已同步 · " + new Date(cloudTimestamp || Date.now()).toLocaleString("zh-HK", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }));
+    if (cloudConflict) {
+      setCloudStatus("此裝置有未同步變更；請在「班別與資料」選擇保留版本。");
+    } else if (cloudModel.diff(cloudBaseline, state)) {
+      queueCloudSave();
+    } else {
+      setCloudStatus("已同步 · " + new Date(cloudTimestamp || Date.now()).toLocaleString("zh-HK", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }));
+      await uploadPendingSamples();
+    }
   }
 
   function showCloudGate(message) {
@@ -305,7 +424,7 @@
       render();
       return;
     }
-    if (!window.supabase?.createClient) {
+    if (!window.supabase?.createClient || !cloudModel) {
       $("#cloudLoginButton").disabled = true;
       showCloudGate("雲端同步程式未能載入。請檢查網絡連線後重新整理。");
       return;
@@ -317,6 +436,9 @@
       if (event === "SIGNED_OUT") {
         cloudReady = false;
         cloudUserId = null;
+        cloudRevision = null;
+        cloudBaseline = null;
+        cloudConflict = false;
         showCloudGate("已登出。請使用教師帳戶登入以查看雲端紀錄。");
       }
     });
@@ -329,7 +451,7 @@
     try { await startCloudSession(data.session); }
     catch (error) {
       console.error("Unable to start cloud sync", error);
-      showCloudGate("雲端尚未準備好。請先在 Supabase 執行資料庫設定 SQL，並建立教師帳戶。");
+      showCloudGate("雲端紀錄未能讀取。請檢查登入帳戶及資料庫設定後重新整理。");
     }
   }
 
@@ -366,15 +488,14 @@
   }
   async function putSample(id, file) {
     await sampleOperation("readwrite", id, file);
-    if (cloudReady) {
-      const { error } = await cloudClient.storage.from(CLOUD_BUCKET).upload(id, file, { upsert: true, contentType: file.type });
-      if (error) throw error;
-    }
+    if (cloudReady) markSamplePending(id);
   }
   async function deleteSample(id) {
     if (cloudReady) {
       const { error } = await cloudClient.storage.from(CLOUD_BUCKET).remove([id]);
       if (error) throw error;
+      localStorage.setItem(CLOUD_PENDING_SAMPLES_KEY + cloudUserId,
+        JSON.stringify(pendingSampleIds().filter((item) => item !== id)));
     }
     await sampleOperation("readwrite", id);
   }
@@ -857,7 +978,7 @@
       catch (error) { console.error(error); return toast("樣本未能儲存，請檢查瀏覽器儲存空間。", true); }
     }
     const existing = state.assignments.find((item) => item.id === id);
-    const updated = { id, classId: activeClassId, title, topic: topicData.topic, chapter: topicData.chapter, detailTopic: $("#assignmentDetailTopic").value.trim(), due, createdAt: existing?.createdAt || new Date().toISOString(), sampleType: file?.type || existing?.sampleType || "", sampleName: file?.name || existing?.sampleName || "" };
+    const updated = { id, classId: activeClassId, title, topic: topicData.topic, chapter: topicData.chapter, detailTopic: $("#assignmentDetailTopic").value.trim(), due, createdAt: existing?.createdAt || new Date().toISOString(), sampleType: file?.type || existing?.sampleType || "", sampleName: file?.name || existing?.sampleName || "", sampleUpdatedAt: file ? new Date().toISOString() : existing?.sampleUpdatedAt || null };
     if (!existing) updated.excludedStudentIds = classStudents().filter((student) => student.longAbsent).map((student) => student.id);
     if (existing) Object.assign(existing, updated);
     else state.assignments.push(updated);
@@ -1238,6 +1359,7 @@
 
   async function importBackup(file) {
     if (!file) return;
+    if (cloudConflict) return toast("請先處理雲端同步衝突，再匯入備份。", true);
     const button = $("#importBackupButton");
     button.disabled = true;
     try {
@@ -1257,7 +1379,12 @@
       if (cloudReady) {
         applyCloudState(data);
         localStorage.setItem(CLOUD_DIRTY_KEY, "1");
-        await syncCloudNow();
+        const synced = await syncCloudNow();
+        if (!synced) throw new Error("Backup remains local until cloud sync succeeds");
+        if (pendingSampleIds().length) {
+          render();
+          return toast("紀錄已匯入；部分樣本檔案仍待同步。", true);
+        }
       }
       location.reload();
     } catch (error) {
@@ -1345,6 +1472,8 @@
   $("#addStudentButton").addEventListener("click", openStudentForm);
   $("#classSettingsButton").addEventListener("click", openSettings);
   $("#mobileSettingsButton").addEventListener("click", openSettings);
+  $("#keepLocalChangesButton").addEventListener("click", () => resolveCloudConflict(true));
+  $("#useCloudChangesButton").addEventListener("click", () => resolveCloudConflict(false));
   $("#exportBackupButton").addEventListener("click", exportBackup);
   $("#importBackupButton").addEventListener("click", () => $("#importBackupFile").click());
   $("#importBackupFile").addEventListener("change", (event) => importBackup(event.target.files[0]));
@@ -1415,18 +1544,23 @@
       $("#cloudLoginMessage").textContent = "";
     } catch (syncError) {
       console.error("Unable to start cloud sync", syncError);
-      $("#cloudLoginMessage").textContent = "雲端未完成設定。請先執行 Supabase SQL 設定，並確認登入帳戶已建立。";
+      $("#cloudLoginMessage").textContent = "雲端紀錄未能讀取。請檢查登入帳戶及資料庫設定。";
     } finally {
       button.disabled = false;
     }
   });
   $("#cloudSignOutButton").addEventListener("click", async () => {
-    if (cloudPending || localStorage.getItem(CLOUD_DIRTY_KEY) === "1") await syncCloudNow();
+    if (cloudConflict) return toast("請先處理同步衝突，再登出。", true);
+    if (cloudPending || localStorage.getItem(CLOUD_DIRTY_KEY) === "1") {
+      await syncCloudNow();
+      if (localStorage.getItem(CLOUD_DIRTY_KEY) === "1") return toast("仍有未同步紀錄，請待同步完成後登出。", true);
+    }
     const { error } = await cloudClient.auth.signOut();
     if (error) toast("登出未能完成，請稍後再試。", true);
   });
   window.addEventListener("online", () => {
     if (cloudReady && (cloudPending || localStorage.getItem(CLOUD_DIRTY_KEY) === "1")) queueCloudSave();
+    else if (cloudReady) { refreshFromCloud(); uploadPendingSamples(); }
   });
   function refreshDay() {
     const current = todayDate();
@@ -1437,7 +1571,11 @@
     if (!$("#appShell").hidden) render();
   }
   window.addEventListener("focus", refreshDay);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshDay(); });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) return;
+    refreshDay();
+    if (cloudReady) refreshFromCloud();
+  });
   setInterval(refreshDay, 60000);
   refreshDay();
   initializeCloud();
