@@ -19,7 +19,7 @@ homework_classes、homework_students、homework_assignments、homework_daily_rec
 
 ## 指定教師使用獨立工作區
 
-依次執行 `supabase/migrations/20261016013431_approved_teacher_workspaces.sql` 及 `20261016014332_private_homework_rpc_implementations.sql`，在現有 API 上加入教師批准機制，並把特權實作移至私人 schema。執行前要求恰有一個現有工作區，將其已驗證的帳戶設為網站管理老師。它不搬移或重寫既有學生、功課或每日紀錄。
+依次執行 `supabase/migrations/20261016014253_approved_teacher_workspaces.sql` 及 `20261016014448_private_homework_rpc_implementations.sql`，在現有 API 上加入教師批准機制，並把特權實作移至私人 schema。執行前要求恰有一個現有工作區，將其已驗證的帳戶設為網站管理老師。它不搬移或重寫既有學生、功課或每日紀錄。
 
 1. 管理老師登入後，在「班別與資料 → 教師使用權限」批准指定 Email。批准只記錄使用權限，不發送邀請郵件。
 2. 將網站連結交給老師。老師用該 Email 註冊、完成電郵驗證後登入。Supabase 的 Site URL / Redirect URLs 應包含 `https://hcwwwwaiii.github.io/homework-record-book/`。
