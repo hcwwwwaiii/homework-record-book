@@ -10,6 +10,21 @@
   const CLOUD_DIRTY_KEY = STORAGE_KEY + "-cloud-dirty";
   const CLOUD_BASE_KEY = STORAGE_KEY + "-cloud-base-";
   const CLOUD_PENDING_SAMPLES_KEY = STORAGE_KEY + "-pending-samples-";
+  const LEGACY_CACHE_OWNER_KEY = STORAGE_KEY + "-legacy-cache-owner";
+  try {
+    if (!localStorage.getItem(LEGACY_CACHE_OWNER_KEY) && localStorage.getItem(CLOUD_USER_KEY)) {
+      localStorage.setItem(LEGACY_CACHE_OWNER_KEY, localStorage.getItem(CLOUD_USER_KEY));
+    }
+    const legacyOwner = localStorage.getItem(LEGACY_CACHE_OWNER_KEY);
+    if (location.protocol !== "file:" && legacyOwner && !localStorage.getItem(STORAGE_KEY + "-account-" + legacyOwner) && localStorage.getItem(STORAGE_KEY)) {
+      localStorage.setItem(STORAGE_KEY + "-account-" + legacyOwner, localStorage.getItem(STORAGE_KEY));
+      if (localStorage.getItem(CLOUD_DIRTY_KEY) === "1") localStorage.setItem(CLOUD_DIRTY_KEY + "-" + legacyOwner, "1");
+    }
+  } catch (error) { console.warn("Unable to copy legacy account cache", error); }
+  const accountStateKey = () => location.protocol === "file:" ? STORAGE_KEY : STORAGE_KEY + "-account-" + (cloudUserId || "signed-out");
+  const accountDirtyKey = () => location.protocol === "file:" ? CLOUD_DIRTY_KEY : CLOUD_DIRTY_KEY + "-" + (cloudUserId || "signed-out");
+  let cloudIsAdmin = false;
+  let signupMode = false;
   const DEFAULT_CLASSES = [
     { id: "math-a", name: "數學 A 班", subject: "數學" },
     { id: "math-b", name: "數學 B 班", subject: "數學" },
@@ -81,7 +96,8 @@
   function loadState() {
     let result;
     try {
-      const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
+      const canReadLegacy = location.protocol === "file:" || (cloudUserId && localStorage.getItem(LEGACY_CACHE_OWNER_KEY) === cloudUserId);
+      const stored = JSON.parse(localStorage.getItem(accountStateKey()) || (canReadLegacy ? localStorage.getItem(STORAGE_KEY) : null));
       if (stored && Array.isArray(stored.classes) && Array.isArray(stored.students) && Array.isArray(stored.assignments) && Array.isArray(stored.misses)) {
         result = {
           classes: DEFAULT_CLASSES.map((base) => ({ ...base, name: stored.classes.find((item) => item.id === base.id)?.name || base.name })),
@@ -117,7 +133,7 @@
         if (dates.length) assignment.firstRecordedOn = dates[0];
       });
       result.dailyRecordVersion = 1;
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(result)); }
+      try { localStorage.setItem(accountStateKey(), JSON.stringify(result)); }
       catch (error) { console.warn("Unable to save migrated daily records", error); }
     }
     if (result.rosterSeedVersion < 1 && window.ROSTER_SEED) {
@@ -133,7 +149,7 @@
         });
       }
       result.rosterSeedVersion = 1;
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(result)); }
+      try { localStorage.setItem(accountStateKey(), JSON.stringify(result)); }
       catch (error) { console.warn("Unable to save imported roster", error); }
     }
     return result;
@@ -141,9 +157,9 @@
 
   function saveState() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      localStorage.setItem(accountStateKey(), JSON.stringify(state));
       if (cloudReady) {
-        localStorage.setItem(CLOUD_DIRTY_KEY, "1");
+        localStorage.setItem(accountDirtyKey(), "1");
         queueCloudSave();
       }
       return true;
@@ -177,7 +193,7 @@
     }
     Object.keys(state).forEach((key) => delete state[key]);
     Object.assign(state, data);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    localStorage.setItem(accountStateKey(), JSON.stringify(state));
   }
 
   function rememberCloudBase(data, revision, updatedAt) {
@@ -228,7 +244,7 @@
         const file = await sampleOperation("readonly", id);
         if (!file) continue;
         const { error } = await cloudClient.storage.from(CLOUD_BUCKET)
-          .upload(id, file, { upsert: true, contentType: file.type });
+          .upload(cloudUserId + "/" + id, file, { upsert: true, contentType: file.type });
         if (error) throw error;
         localStorage.setItem(CLOUD_PENDING_SAMPLES_KEY + cloudUserId,
           JSON.stringify(pendingSampleIds().filter((item) => item !== id)));
@@ -281,19 +297,23 @@
         rememberCloudBase(payload, saved.revision, saved.updatedAt);
       }
       if (cloudModel.diff(cloudBaseline, state)) {
-        localStorage.setItem(CLOUD_DIRTY_KEY, "1");
+        localStorage.setItem(accountDirtyKey(), "1");
         cloudPending = true;
       } else {
-        localStorage.removeItem(CLOUD_DIRTY_KEY);
+        localStorage.removeItem(accountDirtyKey());
       }
       setCloudStatus("已同步 · " + new Date(cloudTimestamp || Date.now()).toLocaleString("zh-HK", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }));
       await uploadPendingSamples();
       return true;
     } catch (error) {
       console.error("Cloud sync failed", error);
+      if (error?.message?.includes("teacher_approval_required")) {
+        cloudReady = false;
+        showCloudGate(cloudAccessError(error));
+      }
       failed = true;
       cloudPending = true;
-      localStorage.setItem(CLOUD_DIRTY_KEY, "1");
+      localStorage.setItem(accountDirtyKey(), "1");
       setCloudStatus("同步暫時失敗；紀錄仍保存在本機，恢復連線後會重試。");
       return false;
     } finally {
@@ -304,17 +324,22 @@
 
   async function refreshFromCloud() {
     if (!cloudReady || cloudBusy || cloudConflict) return;
-    if (localStorage.getItem(CLOUD_DIRTY_KEY) === "1") return queueCloudSave();
+    if (localStorage.getItem(accountDirtyKey()) === "1") return queueCloudSave();
     try {
       const remote = await readCloudState();
       if (remote.revision <= cloudRevision) return;
-      if (localStorage.getItem(CLOUD_DIRTY_KEY) === "1") return queueCloudSave();
+      if (localStorage.getItem(accountDirtyKey()) === "1") return queueCloudSave();
       applyCloudState(remote.state);
       rememberCloudBase(remote.state, remote.revision, remote.updatedAt);
       render();
       setCloudStatus("已接收其他裝置的更新。");
     } catch (error) {
       console.error("Unable to refresh cloud records", error);
+      if (error?.message?.includes("teacher_approval_required")) {
+        cloudReady = false;
+        showCloudGate(cloudAccessError(error));
+        return;
+      }
       setCloudStatus("未能讀取其他裝置的更新；請稍後重試。");
     }
   }
@@ -326,10 +351,10 @@
       const patch = cloudModel.diff(cloudBaseline, state);
       if (useLocal && patch) {
         applyCloudState(cloudModel.apply(remote.state, patch));
-        localStorage.setItem(CLOUD_DIRTY_KEY, "1");
+        localStorage.setItem(accountDirtyKey(), "1");
       } else {
         applyCloudState(remote.state);
-        localStorage.removeItem(CLOUD_DIRTY_KEY);
+        localStorage.removeItem(accountDirtyKey());
       }
       rememberCloudBase(remote.state, remote.revision, remote.updatedAt);
       cloudConflict = false;
@@ -349,10 +374,21 @@
     if (cloudReady && cloudUserId === session.user.id) return;
     cloudReady = false;
     cloudUserId = session.user.id;
+    const ownedLocal = loadState();
+    Object.keys(state).forEach((key) => delete state[key]);
+    Object.assign(state, ownedLocal);
+    if (!localStorage.getItem(accountDirtyKey()) && localStorage.getItem(CLOUD_USER_KEY) === cloudUserId && localStorage.getItem(CLOUD_DIRTY_KEY) === "1") {
+      localStorage.setItem(accountDirtyKey(), "1");
+    }
     setCloudStatus("正在載入雲端紀錄…");
-    const remote = await readCloudState();
-    const hasLocalChanges = localStorage.getItem(CLOUD_DIRTY_KEY) === "1";
-    const hasSyncedHere = localStorage.getItem(CLOUD_USER_KEY) === session.user.id;
+    const { data: opened, error: openError } = await cloudClient.rpc("homework_open_workspace");
+    if (openError) throw openError;
+    cloudIsAdmin = opened.isAdmin === true;
+    const remote = { state: opened.state, revision: Number(opened.revision), updatedAt: opened.updatedAt };
+    if (!validCloudState(remote.state) || !Number.isSafeInteger(remote.revision)) throw new Error("雲端資料格式不正確。");
+    const hasLocalChanges = localStorage.getItem(accountDirtyKey()) === "1";
+    const hasSyncedHere = !!localStorage.getItem(CLOUD_BASE_KEY + cloudUserId) &&
+      (!!localStorage.getItem(accountStateKey()) || localStorage.getItem(LEGACY_CACHE_OWNER_KEY) === cloudUserId);
     if (hasLocalChanges && hasSyncedHere) {
       let oldBase;
       try { oldBase = JSON.parse(localStorage.getItem(CLOUD_BASE_KEY + cloudUserId)); }
@@ -367,7 +403,7 @@
         } else {
           applyCloudState(patch ? cloudModel.apply(remote.state, patch) : remote.state);
           rememberCloudBase(remote.state, remote.revision, remote.updatedAt);
-          if (!patch) localStorage.removeItem(CLOUD_DIRTY_KEY);
+          if (!patch) localStorage.removeItem(accountDirtyKey());
         }
       } else {
         if (cloudModel.diff(remote.state, state)) {
@@ -377,16 +413,21 @@
         } else {
           applyCloudState(remote.state);
           rememberCloudBase(remote.state, remote.revision, remote.updatedAt);
-          localStorage.removeItem(CLOUD_DIRTY_KEY);
+          localStorage.removeItem(accountDirtyKey());
         }
       }
     } else {
       applyCloudState(remote.state);
       rememberCloudBase(remote.state, remote.revision, remote.updatedAt);
-      localStorage.removeItem(CLOUD_DIRTY_KEY);
+      localStorage.removeItem(accountDirtyKey());
     }
     cloudReady = true;
     localStorage.setItem(CLOUD_USER_KEY, session.user.id);
+    localStorage.removeItem(CLOUD_DIRTY_KEY);
+    activeClassId = state.classes[0]?.id || DEFAULT_CLASSES[0].id;
+    $("#teacherAdminSection").hidden = !cloudIsAdmin;
+    if (cloudIsAdmin) loadTeacherApprovals();
+    if (opened.newWorkspace) toast("已建立你的獨立工作區。請在「班別與資料」改班名，再加入學生。");
     $("#cloudGate").hidden = true;
     $("#appShell").hidden = false;
     $("#cloudSignOutButton").hidden = false;
@@ -430,48 +471,67 @@
       return;
     }
     cloudClient = window.supabase.createClient(CLOUD_URL, CLOUD_KEY, {
-      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
     });
-    cloudClient.auth.onAuthStateChange((event) => {
+    cloudClient.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_IN" && cloudUserId && session?.user?.id !== cloudUserId) {
+        location.reload();
+        return;
+      }
       if (event === "SIGNED_OUT") {
+        clearTimeout(cloudTimer);
+        if (cloudChannel) cloudClient.removeChannel(cloudChannel);
+        cloudPending = false;
+        cloudIsAdmin = false;
+        document.querySelectorAll("dialog[open]").forEach((dialog) => dialog.close());
+        objectUrls.forEach((url) => URL.revokeObjectURL(url));
+        objectUrls = [];
+        if (previewUrl) URL.revokeObjectURL(previewUrl);
+        previewUrl = null;
         cloudReady = false;
         cloudUserId = null;
         cloudRevision = null;
         cloudBaseline = null;
         cloudConflict = false;
         showCloudGate("已登出。請使用教師帳戶登入以查看雲端紀錄。");
+        location.reload();
       }
     });
     const { data, error } = await cloudClient.auth.getSession();
     if (error) { showCloudGate("登入狀態讀取失敗，請重新整理。"); return; }
     if (!data.session) {
-      showCloudGate("請使用已建立的教師帳戶登入。");
+      showCloudGate("請使用已獲批准的教師 Email 登入；首次使用請先註冊。");
       return;
     }
     try { await startCloudSession(data.session); }
     catch (error) {
       console.error("Unable to start cloud sync", error);
-      showCloudGate("雲端紀錄未能讀取。請檢查登入帳戶及資料庫設定後重新整理。");
+      showCloudGate(cloudAccessError(error));
     }
   }
 
-  function openSampleDb() {
+  function openSampleDb(legacy = false) {
     return new Promise((resolve, reject) => {
       if (!window.indexedDB) return reject(new Error("IndexedDB unavailable"));
-      const request = indexedDB.open("homework-followup-samples", 1);
+      const request = indexedDB.open(legacy || location.protocol === "file:" ? "homework-followup-samples" : "homework-followup-samples-" + cloudUserId, 1);
       request.onupgradeneeded = () => request.result.createObjectStore("samples");
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
   }
 
-  async function sampleOperation(mode, id, value) {
-    const db = await openSampleDb();
+  async function sampleOperation(mode, id, value, legacy = false) {
+    const db = await openSampleDb(legacy);
     return new Promise((resolve, reject) => {
       const tx = db.transaction("samples", mode);
       const store = tx.objectStore("samples");
       const request = mode === "readonly" ? store.get(id) : value === undefined ? store.delete(id) : store.put(value, id);
-      request.onsuccess = () => resolve(request.result);
+      request.onsuccess = () => {
+        if (!legacy && mode === "readonly" && !request.result && cloudUserId &&
+            localStorage.getItem(LEGACY_CACHE_OWNER_KEY) === cloudUserId && pendingSampleIds().includes(id)) {
+          sampleOperation(mode, id, value, true).then(resolve, reject);
+        } else resolve(request.result);
+      };
       request.onerror = () => reject(request.error);
       tx.oncomplete = () => db.close();
       tx.onerror = () => { db.close(); reject(tx.error); };
@@ -481,7 +541,9 @@
   async function getSample(id) {
     const local = await sampleOperation("readonly", id);
     if (local || !cloudReady) return local;
-    const { data, error } = await cloudClient.storage.from(CLOUD_BUCKET).download(id);
+    let { data, error } = await cloudClient.storage.from(CLOUD_BUCKET).download(cloudUserId + "/" + id);
+    // Original uploads remain at bare assignment IDs; RLS also checks their original uploader.
+    if (error) ({ data, error } = await cloudClient.storage.from(CLOUD_BUCKET).download(id));
     if (error) throw error;
     await sampleOperation("readwrite", id, data);
     return data;
@@ -492,7 +554,7 @@
   }
   async function deleteSample(id) {
     if (cloudReady) {
-      const { error } = await cloudClient.storage.from(CLOUD_BUCKET).remove([id]);
+      const { error } = await cloudClient.storage.from(CLOUD_BUCKET).remove([cloudUserId + "/" + id, id]);
       if (error) throw error;
       localStorage.setItem(CLOUD_PENDING_SAMPLES_KEY + cloudUserId,
         JSON.stringify(pendingSampleIds().filter((item) => item !== id)));
@@ -1375,10 +1437,10 @@
         await putSample(item.assignmentId, dataUrlAsBlob(item.data));
       }
       data.rosterSeedVersion = 1;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      localStorage.setItem(accountStateKey(), JSON.stringify(data));
       if (cloudReady) {
         applyCloudState(data);
-        localStorage.setItem(CLOUD_DIRTY_KEY, "1");
+        localStorage.setItem(accountDirtyKey(), "1");
         const synced = await syncCloudNow();
         if (!synced) throw new Error("Backup remains local until cloud sync succeeds");
         if (pendingSampleIds().length) {
@@ -1524,42 +1586,113 @@
     const file = $("#assignmentSample").files[0];
     $("#selectedFile").textContent = file ? `已選擇：${file.name}` : "";
   });
+  function cloudAccessError(error) {
+    return error?.message?.includes("teacher_approval_required") ? "此 Email 尚未獲批准或權限已停用。請聯絡網站管理老師。" : "雲端紀錄未能讀取，請稍後重試；原有資料未被更改。";
+  }
+
+  $("#cloudSignupToggle").addEventListener("click", () => {
+    signupMode = !signupMode;
+    $("#cloudLoginTitle").textContent = signupMode ? "註冊教師帳戶" : "登入功課記錄簿";
+    $("#cloudLoginButton").textContent = signupMode ? "註冊教師帳戶" : "登入並同步";
+    $("#cloudSignupToggle").textContent = signupMode ? "已有帳戶？返回登入" : "首次使用？註冊教師帳戶";
+    $("#cloudPassword").autocomplete = signupMode ? "new-password" : "current-password";
+    $("#cloudPassword").minLength = signupMode ? 8 : 0;
+    $("#cloudConfirmPasswordField").hidden = !signupMode;
+    $("#cloudConfirmPassword").required = signupMode;
+    $("#cloudConfirmPassword").value = "";
+    $("#cloudPassword").value = "";
+    $("#cloudLoginMessage").textContent = signupMode ? "先請管理老師批准你的 Email；註冊後須完成電郵驗證。" : "";
+  });
+
   $("#cloudLoginForm").addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (!cloudClient) return;
     const button = $("#cloudLoginButton");
-    button.disabled = true;
-    $("#cloudLoginMessage").textContent = "正在登入…";
-    const { data, error } = await cloudClient.auth.signInWithPassword({
-      email: $("#cloudEmail").value.trim(),
-      password: $("#cloudPassword").value
-    });
-    if (error) {
-      $("#cloudLoginMessage").textContent = "登入失敗，請確認電郵、密碼及教師帳戶設定。";
-      button.disabled = false;
+    if (signupMode && $("#cloudPassword").value !== $("#cloudConfirmPassword").value) {
+      $("#cloudLoginMessage").textContent = "兩次輸入的密碼不同。";
       return;
     }
+    button.disabled = true;
+    $("#cloudSignupToggle").disabled = true;
+    $("#cloudLoginMessage").textContent = signupMode ? "正在註冊…" : "正在登入…";
     try {
-      await startCloudSession(data.session);
+      const credentials = { email: $("#cloudEmail").value.trim(), password: $("#cloudPassword").value };
+      const { data, error } = signupMode ? await cloudClient.auth.signUp({ ...credentials,
+        options: { emailRedirectTo: "https://hcwwwwaiii.github.io/homework-record-book/" }
+      }) : await cloudClient.auth.signInWithPassword(credentials);
+      if (error) {
+        const code = error.code || "";
+        $("#cloudLoginMessage").textContent = signupMode ?
+          (code === "email_address_not_authorized" ? "驗證郵件服務尚未設定完成，請聯絡網站管理老師。" : "註冊未能完成。請確認 Email、密碼最少 8 個字元，稍後再試；已有帳戶請返回登入。") :
+          "登入失敗，請確認 Email、密碼，並先完成電郵驗證。";
+        return;
+      }
       $("#cloudPassword").value = "";
+      $("#cloudConfirmPassword").value = "";
+      if (!data.session) {
+        $("#cloudLoginMessage").textContent = "如註冊成功，你會收到驗證郵件。請開啟信中連結，再回到此網站登入；未收到請檢查垃圾郵件。已有帳戶請直接登入。";
+        return;
+      }
+      await startCloudSession(data.session);
       $("#cloudLoginMessage").textContent = "";
-    } catch (syncError) {
-      console.error("Unable to start cloud sync", syncError);
-      $("#cloudLoginMessage").textContent = "雲端紀錄未能讀取。請檢查登入帳戶及資料庫設定。";
+    } catch (error) {
+      $("#cloudLoginMessage").textContent = cloudAccessError(error);
     } finally {
       button.disabled = false;
+      $("#cloudSignupToggle").disabled = false;
     }
+  });
+
+  async function loadTeacherApprovals() {
+    if (!cloudReady || !cloudIsAdmin) return;
+    const { data, error } = await cloudClient.rpc("homework_manage_teachers");
+    if (error) { $("#teacherAdminMessage").textContent = "未能讀取教師名單，請稍後重試。"; return; }
+    renderTeacherApprovals(data.teachers);
+  }
+  function renderTeacherApprovals(teachers) {
+    $("#teacherApprovalList").innerHTML = teachers.map((teacher) => `<li><div><strong>${esc(teacher.email)}</strong><p class="form-note">${teacher.isAdmin ? "網站管理老師" : teacher.enabled ? (teacher.registered ? "已批准 · 已啟用獨立工作區" : "已批准 · 待老師註冊及首次登入") : "已停用 · 原有資料保留"}</p></div>${teacher.isAdmin ? "" : `<button type="button" class="secondary-button" data-teacher-email="${esc(teacher.email)}" data-teacher-enabled="${!teacher.enabled}">${teacher.enabled ? "停用" : "重新批准"}</button>`}</li>`).join("");
+  }
+  async function updateTeacherApproval(email, enabled) {
+    if (!cloudReady || !cloudIsAdmin) return;
+    $("#teacherApproveButton").disabled = true;
+    $("#teacherAdminMessage").textContent = "正在儲存…";
+    try {
+      const { data, error } = await cloudClient.rpc("homework_manage_teachers", { p_email: email, p_enabled: enabled });
+      if (error) throw error;
+      renderTeacherApprovals(data.teachers);
+      $("#teacherAdminMessage").textContent = enabled ? "已批准。請把網站連結交給老師，使用這個 Email 註冊並完成驗證。此操作不會發送邀請郵件。" : "已停用登入及雲端存取，該老師原有資料已保留。";
+      $("#teacherApprovalEmail").value = "";
+    } catch { $("#teacherAdminMessage").textContent = "儲存失敗，請確認 Email 及管理權限後重試。"; }
+    finally { $("#teacherApproveButton").disabled = false; }
+  }
+  $("#teacherApproveButton").addEventListener("click", () => {
+    const input = $("#teacherApprovalEmail");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.value.trim())) {
+      $("#teacherAdminMessage").textContent = "請輸入完整的教師 Email。";
+      return;
+    }
+    updateTeacherApproval(input.value.trim(), true);
+  });
+  $("#teacherApprovalEmail").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") { event.preventDefault(); $("#teacherApproveButton").click(); }
+  });
+  $("#teacherApprovalList").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-teacher-email]");
+    if (!button) return;
+    if (button.dataset.teacherEnabled === "false" && !confirm("停用 " + button.dataset.teacherEmail + " 的網站存取？該老師的原有資料會保留；已下載到其裝置的資料無法收回。")) return;
+    updateTeacherApproval(button.dataset.teacherEmail, button.dataset.teacherEnabled === "true");
   });
   $("#cloudSignOutButton").addEventListener("click", async () => {
     if (cloudConflict) return toast("請先處理同步衝突，再登出。", true);
-    if (cloudPending || localStorage.getItem(CLOUD_DIRTY_KEY) === "1") {
+    if (cloudPending || localStorage.getItem(accountDirtyKey()) === "1") {
       await syncCloudNow();
-      if (localStorage.getItem(CLOUD_DIRTY_KEY) === "1") return toast("仍有未同步紀錄，請待同步完成後登出。", true);
+      if (localStorage.getItem(accountDirtyKey()) === "1") return toast("仍有未同步紀錄，請待同步完成後登出。", true);
     }
     const { error } = await cloudClient.auth.signOut();
     if (error) toast("登出未能完成，請稍後再試。", true);
   });
   window.addEventListener("online", () => {
-    if (cloudReady && (cloudPending || localStorage.getItem(CLOUD_DIRTY_KEY) === "1")) queueCloudSave();
+    if (cloudReady && (cloudPending || localStorage.getItem(accountDirtyKey()) === "1")) queueCloudSave();
     else if (cloudReady) { refreshFromCloud(); uploadPendingSamples(); }
   });
   function refreshDay() {
@@ -1580,6 +1713,7 @@
   refreshDay();
   initializeCloud();
 })();
+
 
 
 
