@@ -11,7 +11,9 @@
 - README 說明網站由 GitHub Pages 託管，登入、教師獨立資料及私人功課樣本由 Supabase 提供。
 - 已核對的程式檔案：index.html、app.js、cloud-model.js、styles.css；根目錄另有 supabase-setup.sql、supabase-migration-01.sql、supabase-migration-02-cutover.sql，以及 supabase/migrations/ 內的兩個 migration。檔案存在不證明有自動執行，也不能據此決定重跑或執行次序。
 - 沒有 package.json、test script 或 tracked .github workflow。不得套用其他專案的 Cloudflare 或 pnpm 部署流程。
-- 實際 GitHub Pages source branch/path、自動部署條件、required checks、Supabase GitHub 整合／branching、自動 migration 目標及正式設定均未核實。
+- 2026-10-17 Codex 只讀查看已登入的 GitHub Pages 設定：Source 為 Deploy from a branch、branch 為 main、目錄為 / (root)。合併到 main 會重新發布網站。
+- 同日以程式的公開 backend URL 配對正確 Supabase 專案，只讀查看 Project Overview：GITHUB 為 No repository connected，RECENT BRANCH 為 No branches。該專案沒有設定原生 GitHub／branching 自動 migration；沒有執行 SQL 或改資料。
+- Repository 的 Webhooks 頁面沒有列出 webhook，main 沒有 tracked .github workflow。GitHub Apps 頁面列出 Codex、Cloudflare、Cursor 及 Netlify；App 安裝本身不證明已設定發布本專案，未全面核對每個外部服務的內部設定。其他 Supabase 正式設定、Grok 實際權限及原專案同步仍未獨立驗證。
 - 本 PR 只新增 AGENTS.md 及本文件，不修改網站、SQL、資料、驗證或部署設定。
 - 使用者已明確批准新增 12 個協作 Labels；已逐一建立並核對，保留原有 10 個標籤。
 - 使用者轉述：Grok 已將本 Repository 納入 PR Review Watch，已讀 PR head 規則並只讀審查。19:05 的執行結果已回報；目前排程據報為每日 19:00、Asia/Hong_Kong。完整記憶保存、實際排程設定和下次執行時間未由 Codex 獨立核驗。
@@ -88,4 +90,5 @@ hcwwwwaiii/homework-record-book
 - 檢閱及決定是否合併本設定 PR；沒有自動合併。
 - 使用者已轉述 Grok 團隊加入專案、讀取 PR head 並完成只讀審查；部分成員後續意見仍待補報。
 - 使用者已回報 Routine 執行結果；待 Grok 顯示的排程、兩專案範圍、啟用狀態及下次執行時間作設定核對。
-- 原有 Codex 專案同步及 Pages 發布設定核對。
+- Pages main／根目錄及 Supabase 沒有 GitHub／branching 連接已核對；待使用者批准 PR #3 合併及 Pages 重新發布。
+- 原有 Codex 專案同步與 Grok 帳戶內細項權限仍待各帳戶端確認。
