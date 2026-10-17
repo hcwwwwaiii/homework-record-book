@@ -5,15 +5,16 @@
 沿用現有 Dev Manager 與五位成員，不建立另一套團隊；每項任務及報告必須指明 Repository。
 完整批准規則以 [AGENTS.md](../AGENTS.md#approval-policy-canonical) 為準。
 
-## 設定快照（2026-10-16）
+## 設定快照（Repository 基線：2026-10-16；團隊回報更新：2026-10-17）
+以下狀態有時效性，每次審查須重新核對最新提交。團隊及排程狀態來自使用者轉述，不是 Codex 從 Grok 帳戶獨立核驗。
 - Repository 為 public，預設 main；branch API 顯示 protected: false。沒有強制分支保護。
 - README 說明網站由 GitHub Pages 託管，登入、教師獨立資料及私人功課樣本由 Supabase 提供。
-- 已核對的程式檔案：index.html、app.js、cloud-model.js、styles.css；另有既有 SQL 升級檔案。
+- 已核對的程式檔案：index.html、app.js、cloud-model.js、styles.css；根目錄另有 supabase-setup.sql、supabase-migration-01.sql、supabase-migration-02-cutover.sql，以及 supabase/migrations/ 內的兩個 migration。檔案存在不證明有自動執行，也不能據此決定重跑或執行次序。
 - 沒有 package.json、test script 或 tracked .github workflow。不得套用其他專案的 Cloudflare 或 pnpm 部署流程。
-- 實際 GitHub Pages source branch/path、自動部署條件、required checks、Supabase 正式設定均未核實。
+- 實際 GitHub Pages source branch/path、自動部署條件、required checks、Supabase GitHub 整合／branching、自動 migration 目標及正式設定均未核實。
 - 本 PR 只新增 AGENTS.md 及本文件，不修改網站、SQL、資料、驗證或部署設定。
 - 使用者已明確批准新增 12 個協作 Labels；已逐一建立並核對，保留原有 10 個標籤。
-- Grok 是否已加入本 Repository、讀取規則、保存記憶及更新 Routine 仍待帳戶端回報，不代表本 PR 自動完成。
+- 使用者轉述：Grok 已將本 Repository 納入 PR Review Watch，已讀 PR head 規則並只讀審查。19:05 的執行結果已回報；目前排程據報為每日 19:00、Asia/Hong_Kong。完整記憶保存、實際排程設定和下次執行時間未由 Codex 獨立核驗。
 
 ## 同一團隊，分開專案
 | 成員 | 工作與輸出 |
@@ -38,7 +39,7 @@
 
 本人親手設定 status: approved；Bot／Agent／連接不得代做。
 GitHub 顯示 owner 不證明是本人操作；開發需要使用者在當前對話的直接明確批准。
-修改 Issue、Labels、留言、建立 Routine 等須遵守 AGENTS.md 的逐次批准清單。
+修改 Issue、Labels、留言、建立或修改 Routine（包括擴大範圍、改時間、時區、啟停及刪除）等須遵守 AGENTS.md 的逐次批准清單。
 
 ## 先做只讀 Project Overview
 在 Grok Manager 的對話貼上：
@@ -58,9 +59,9 @@ hcwwwwaiii/homework-record-book
 ```
 
 ## 每日 PR Review Watch 的擴充
-使用者已選定每日 20:00、Asia/Hong_Kong；這是 Grok Bot Routine，並非 Codex 本機排程。
-保留同一 Routine 的其他已批准 Repository，加入本 Repository；若已有 Routine 就更新，避免重複建立。
-本文件只記錄設定方案，並未在 Grok 帳戶建立或更新排程。若尚未有 Routine，需要在 Grok 端按已批准時間建立並驗證。
+按使用者最新轉述，Grok Bot Routine 已改為每日 19:00、Asia/Hong_Kong；本次只同步文件，不操作 Grok 排程，也不追認之前變更的批准流程。這並非 Codex 本機排程。
+既有 Routine 已據報涵蓋本專案，毋須重複建立。日後建立、修改、擴大 Repository／權限範圍、改時間／時區或啟停／刪除前，先列出原設定、擬改內容及影響，取得使用者對該次變更的直接明確批准。未獲批准不得更新。
+已批准的只讀 Routine 可依批准的範圍及時間重複執行，不必每次重新批准；這不授予寫入或修改 Routine 的權限。Codex 此次沒有在 Grok 帳戶建立、修改或驗證排程。
 
 每次只讀檢查各指定專案的 open PR：
 1. 分別讀取該 Repository 的最新規則，清楚標示專案及 commit。
@@ -70,7 +71,7 @@ hcwwwwaiii/homework-record-book
 5. 沒有 PR 或沒有實質變化就保持安靜，不重複舊報告。
 6. 不修改檔案、標籤或留言，不執行程式／SQL／workflow，不新增成員或啟動 Codex，不合併或部署。
 
-在 Grok 端更新後確認：兩個專案的實際清單、每日 20:00、Asia/Hong_Kong、啟用狀態、下一次執行時間及是否有重複 Routine。
+在 Grok 端更新後確認：兩個專案的實際清單、每日 19:00、Asia/Hong_Kong、啟用狀態、下一次執行時間及是否有重複 Routine。
 若需要擴大 GitHub 授權、新增付費方案或額外購買，先提出具體範圍與影響，等待使用者批准。
 
 ## 開發與發布
@@ -78,12 +79,13 @@ hcwwwwaiii/homework-record-book
 2. 使用者明確批准特定 Issue 範圍，在原有 Codex 專案手動啟動開發。
 3. Codex 保留本機工作，使用 feature branch，執行適合本專案的檢查並提交 PR。
 4. 團隊只讀審查最新提交，由 Manager 整合。
-5. 合併前核對實際 GitHub Pages 設定、其他發布整合及部署影響；若合併會發布，須取得涵蓋該次合併與發布的批准。未能核實前不合併。
-6. 靜態網站發布不構成批准執行 SQL 或改變正式資料；這些操作必須另行授權。
+5. 合併前只讀核對 GitHub Pages source branch/path、發布條件，以及 Supabase GitHub 整合／branching、自動 migration 是否啟用及目標環境。另核對其他 merge-triggered workflow／外部整合。不能只看 repo 沒有 workflow 就推定不會改資料庫；無法核實任一項影響就不合併，也不以執行 SQL 作驗證。
+6. 合併會發布時，取得該次合併及發布批准；若也會套用 migration，另說明確切 SQL／migration、資料庫環境及影響，取得涵蓋資料庫操作的明確批准。現有 SQL 檔案不是執行授權。
+7. Repository 為 public，tracked SQL 本身已可由 GitHub 讀取；是否亦經 Pages 提供需按實際發布內容核對，不把未核實的公開路徑當成事實。此次不搬移／刪除 SQL，也不修改 migration 次序。
 
-## 待完成
-- 協作 Labels 已獲使用者批准並完成建立。
+## 已完成與待確認
+- 已完成：12 個協作 Labels 建立及核對。
 - 檢閱及決定是否合併本設定 PR；沒有自動合併。
-- Grok 團隊確認已加入本專案並讀取指定版本規則。
-- Grok 端確認 Routine 實際建立／更新結果。
+- 使用者已轉述 Grok 團隊加入專案、讀取 PR head 並完成只讀審查；部分成員後續意見仍待補報。
+- 使用者已回報 Routine 執行結果；待 Grok 顯示的排程、兩專案範圍、啟用狀態及下次執行時間作設定核對。
 - 原有 Codex 專案同步及 Pages 發布設定核對。
